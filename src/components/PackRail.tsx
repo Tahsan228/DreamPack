@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { MCButton, MCPanel, MCProgress } from './mc/MCPrimitives';
+import { AdSlot } from './AdSlot';
 import type { ImportedPack } from '../core/types';
 
 function PackCard({
@@ -206,6 +207,10 @@ export function PackRail() {
           </div>
         )}
       </div>
+
+      {/* The rail runs full height whatever is in it, so the space under the
+          import button is already spare. */}
+      <AdSlot id="rail" variant="inset" />
     </MCPanel>
   );
 }

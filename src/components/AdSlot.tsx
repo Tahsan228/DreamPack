@@ -19,17 +19,30 @@ declare global {
 const filled = new WeakSet<Element>();
 
 /**
- * One AdSense display unit.
+ * Where the unit sits, which decides what chrome it wears.
  *
- * Placement, format and reserved height come from config/ads.ts. A placement
- * with no slot id yet renders nothing in a build, so an unconfigured unit can
- * never leave an empty labelled box on the live site.
+ * - `inset` goes inside a panel that already exists, so it draws only the same
+ *   divider rule the other sections of that panel use.
+ * - `panel` stands on its own and gets the app's dark panel frame, so it reads
+ *   as another piece of the GUI rather than a box floating on the dirt.
+ */
+type AdVariant = 'inset' | 'panel';
+
+/**
+ * One AdSense display unit, dressed as part of the Minecraft GUI: the same
+ * uppercase section heading as "Resource Packs" or "Viewport" above it, and the
+ * same panel or divider treatment as whatever it sits in.
+ *
+ * A placement with no slot id yet renders nothing in a build, so an
+ * unconfigured unit can never leave an empty labelled box on the live site.
  */
 export function AdSlot({
   id,
+  variant = 'panel',
   className = '',
 }: {
   id: AdPlacementId;
+  variant?: AdVariant;
   className?: string;
 }) {
   const placement = AD_PLACEMENTS[id];
@@ -41,10 +54,10 @@ export function AdSlot({
 
     /**
      * AdSense rejects an <ins> that is zero-width at push time
-     * ("availableWidth=0") and does not retry on its own. The header rails are
-     * display:none at some widths and the donate unit is inside a screen that
-     * mounts later, so waiting for a real box is the normal path here, not an
-     * edge case.
+     * ("availableWidth=0") and does not retry on its own. The donate unit lives
+     * in a screen that mounts later, and the rail and viewport units are inside
+     * panels that only exist once a pack is loaded, so waiting for a real box
+     * is the normal path here, not an edge case.
      */
     const tryFill = () => {
       const el = insRef.current;
@@ -70,40 +83,47 @@ export function AdSlot({
     return () => observer.disconnect();
   }, [configured]);
 
+  const shell = [
+    'ad-slot',
+    `ad-slot-${variant}`,
+    variant === 'panel' ? 'mc-panel-dark' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   if (!configured) {
     // Dev-only outline so the placement can be checked before the unit exists.
     if (!import.meta.env.DEV) return null;
     return (
-      <div
-        className={`ad-slot ad-slot-empty ${className}`}
-        style={{ minHeight: placement.reserveHeight }}
-        aria-hidden="true"
-      >
-        <span className="t-gray">ad: {id}</span>
-        <span className="t-gray ad-slot-note">{placement.note}</span>
+      <div className={shell} aria-hidden="true">
+        <div className="section-title">Advertisement</div>
+        <div className="ad-slot-frame">
+          <div className="ad-slot-empty" style={{ minHeight: placement.reserveHeight }}>
+            <span className="t-gray">ad: {id}</span>
+            <span className="t-gray ad-slot-note">{placement.note}</span>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <aside
-      className={`ad-slot ${className}`}
-      style={{ minHeight: placement.reserveHeight }}
-      aria-label="Advertisement"
-    >
-      {/* AdSense permits only "Advertisement" or "Sponsored Links" as a label. */}
-      <span className="ad-slot-label" aria-hidden="true">
-        Advertisement
-      </span>
-      <ins
-        ref={insRef}
-        className="adsbygoogle ad-slot-ins"
-        style={{ display: 'block', width: '100%' }}
-        data-ad-client={AD_CLIENT}
-        data-ad-slot={placement.slot}
-        data-ad-format={placement.format}
-        data-full-width-responsive={placement.fullWidthResponsive ? 'true' : 'false'}
-      />
+    <aside className={shell} aria-label="Advertisement">
+      {/* AdSense permits only "Advertisement" or "Sponsored Links" as a label.
+          Styled as a section heading so it matches the panel it sits in. */}
+      <div className="section-title">Advertisement</div>
+      <div className="ad-slot-frame" style={{ minHeight: placement.reserveHeight }}>
+        <ins
+          ref={insRef}
+          className="adsbygoogle ad-slot-ins"
+          style={{ display: 'block', width: '100%' }}
+          data-ad-client={AD_CLIENT}
+          data-ad-slot={placement.slot}
+          data-ad-format={placement.format}
+          data-full-width-responsive={placement.fullWidthResponsive ? 'true' : 'false'}
+        />
+      </div>
     </aside>
   );
 }

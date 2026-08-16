@@ -40,7 +40,7 @@ export function DonatePage({ onClose }: { onClose: () => void }) {
         <p className="screen-body">
           {/* Hyphen, not an em dash: Minecraftia has no glyph for one. */}
           DreamPack is free, needs no account, and runs entirely in your
-          browser - your packs never leave your machine.
+          browser.
           {/* Only claimed once a unit is actually live, so the copy can never
               promise ads that are not there or deny ads that are. */}
           {ads ? ' A few ads cover the hosting.' : ''} It is made in spare time.

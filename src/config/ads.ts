@@ -17,11 +17,20 @@
  * while the real units are pending and the live site never shows a dead gap.
  * Filling in only some of them is fine.
  * ============================================================================
+ *
+ * Every placement sits in space the app already had spare, inside the panel
+ * that owns that space. Nothing was re-laid-out to make room for an ad — if a
+ * unit ever needs the app to move, it is in the wrong place.
  */
 
 export const AD_CLIENT = 'ca-pub-7711499728620769';
 
-export type AdPlacementId = 'headerLeft' | 'headerRight' | 'footer' | 'donate';
+/*
+ * There is deliberately no unit in the viewport column. That panel is the
+ * comparison surface — preview, metadata and candidate chips are meant to be
+ * read together — and anything else in it pushes them out of view.
+ */
+export type AdPlacementId = 'rail' | 'footer' | 'donate';
 
 export interface AdPlacement {
   /** `data-ad-slot` from the AdSense ad unit. Empty means "not set up yet". */
@@ -30,13 +39,13 @@ export interface AdPlacement {
   format: 'auto' | 'horizontal' | 'rectangle';
   /**
    * Lets AdSense span the full viewport width on small screens. Only sensible
-   * where the placement really is full-bleed; inside a grid cell it produces an
-   * ad wider than its container.
+   * where the placement really is full-bleed; inside a panel it produces an ad
+   * wider than the panel holding it.
    */
   fullWidthResponsive: boolean;
   /**
    * Height held open before the ad arrives, so filling it does not shove the
-   * page around. Roughly the shortest shape AdSense serves for that format.
+   * panel around. Roughly the shortest shape AdSense serves for that format.
    */
   reserveHeight: number;
   /** Only shown in the dev placeholder, to identify the box on screen. */
@@ -44,19 +53,13 @@ export interface AdPlacement {
 }
 
 export const AD_PLACEMENTS: Record<AdPlacementId, AdPlacement> = {
-  headerLeft: {
+  rail: {
     slot: '',
-    format: 'horizontal',
+    // The rail is the narrowest column, so let AdSense pick whatever fits.
+    format: 'auto',
     fullWidthResponsive: false,
-    reserveHeight: 90,
-    note: 'header, left of the wordmark',
-  },
-  headerRight: {
-    slot: '',
-    format: 'horizontal',
-    fullWidthResponsive: false,
-    reserveHeight: 90,
-    note: 'header, right of the wordmark',
+    reserveHeight: 250,
+    note: 'foot of the packs rail',
   },
   footer: {
     slot: '',

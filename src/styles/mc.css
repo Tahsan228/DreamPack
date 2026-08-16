@@ -476,11 +476,6 @@
  * Title band
  * ------------------------------------------------------------------ */
 
-/*
- * Narrow layout: a plain centred column. The wide three-column form, with an
- * ad rail either side of the wordmark, is further down under the 1081px query —
- * the same width at which the fixed corner buttons drop into the flow.
- */
 .dp-title-band {
   position: relative;
   display: flex;
@@ -489,14 +484,6 @@
   align-items: center;
   gap: 0;
   padding: 14px 0 16px;
-}
-
-.dp-title-center {
-  order: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 0;
 }
 
 .dp-credit {
@@ -601,24 +588,15 @@
   }
 }
 
-/*
- * The tucked form, used wherever the splash has no room to sit off the logo's
- * corner. Hoisted out of the media query it used to live in: keyframes only
- * apply while their enclosing query matches, and two ranges need these now.
- */
+/* The tucked form's pulse. Kept at the top level rather than inside the query
+   that uses it, so the two stay independent of each other. */
 @keyframes mc-splash-flat {
   0%, 50%, 100% { transform: rotate(-6deg) scale(1); }
   25%, 75% { transform: rotate(-6deg) scale(0.944); }
 }
 
-/*
- * Tuck the splash under the logo once there is no room beside it — either
- * because the screen is narrow, or because the header ad rail is occupying
- * that space. Being absolutely positioned, the splash overflows its column
- * silently, so it would otherwise print straight over the right-hand rail;
- * the longest splash string is wider than the clearance even at 1920.
- */
-@media (max-width: 900px), (min-width: 1081px) {
+/* Tuck the splash under the logo once there is no room beside it. */
+@media (max-width: 900px) {
   .dp-splash {
     position: static;
     left: auto;
@@ -634,9 +612,7 @@
     animation-name: mc-splash-flat;
     animation-duration: 2.6s;
   }
-}
 
-@media (max-width: 900px) {
   .dp-title-band {
     flex-direction: column;
     gap: 8px;
@@ -1027,28 +1003,39 @@
 /* ------------------------------------------------------------------ *
  * Ad units
  *
- * Every placement flows inside the layout — none of them float, overlay or
- * stick. Two rules keep them out of the way: they only ever sit in space the
- * app was not using, and they keep a clear gap from any button, so a click
- * aimed at the UI can never land on an ad.
+ * Dressed as ordinary GUI furniture: the same uppercase section heading the
+ * panels already use, and either that panel's own divider rule or the dark
+ * panel frame. Nothing floats, overlays or sticks, and nothing in the app was
+ * moved to make room — each unit sits in space its panel already had spare.
  * ------------------------------------------------------------------ */
 
 .ad-slot {
   display: block;
   min-width: 0;
-  /* Never let a wide unit push a grid column past its track. */
+  /* Never let a wide unit push its column past its track. */
   max-width: 100%;
   overflow: hidden;
+  /* Bottom of a .col panel, below the flexing scroll area. */
+  flex: none;
 }
 
-.ad-slot-label {
-  display: block;
-  font-size: 16px;
-  line-height: var(--lh-body);
-  text-align: center;
-  color: var(--mc-gray);
-  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
-  opacity: 0.7;
+/* Inside a panel that already exists: the same rule its other sections use. */
+.ad-slot-inset {
+  border-top: 2px solid #101010;
+}
+
+/* Sits at the foot of a .col panel whose content does not fill the height. */
+.ad-slot-pinned {
+  margin-top: auto;
+}
+
+/* Standalone: carries the app frame itself (mc-panel-dark is added in JSX). */
+.ad-slot-panel {
+  padding-bottom: 2px;
+}
+
+.ad-slot-frame {
+  padding: 0 8px 8px;
 }
 
 .ad-slot-ins {
@@ -1063,7 +1050,7 @@
   gap: 2px;
   padding: 8px;
   text-align: center;
-  border: var(--px) dashed #6b6b6b;
+  border: var(--px) dashed #4a4a4a;
   background: rgba(0, 0, 0, 0.25);
   font-size: 16px;
   line-height: var(--lh-body);
@@ -1071,20 +1058,6 @@
 
 .ad-slot-note {
   opacity: 0.6;
-}
-
-/* ---- Header rails -------------------------------------------------- */
-
-/*
- * Narrow: one rail only, tucked under the wordmark. Two units in a phone
- * header is more ad than app, and the second would push the controls below
- * the fold on a short screen.
- */
-.dp-band-ad-left {
-  order: 2;
-  width: 100%;
-  max-width: 468px;
-  margin-top: 12px;
 }
 
 /* ---- Footer -------------------------------------------------------- */
@@ -1099,64 +1072,22 @@
 /* ---- Donate screen ------------------------------------------------- */
 
 .screen-ad {
-  width: min(336px, 88vw);
-  /* Deliberately generous: the buttons above and Back below are both live. */
-  margin: 28px 0 4px;
+  width: min(360px, 88vw);
+  /* Clear of Back above it, which is the only way out of this menu. */
+  margin-top: 32px;
 }
 
 /* ------------------------------------------------------------------ *
  * Responsive layout
  * ------------------------------------------------------------------ */
 
-/*
- * Wide: the wordmark sits in the middle track with an ad rail either side.
- * The rails are pushed down clear of the fixed corner buttons rather than
- * placed beside them.
- */
 @media (min-width: 1081px) {
-  .dp-title-band {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    align-items: end;
-    gap: 20px;
-    padding: 14px 16px 16px;
-  }
-
-  .dp-title-center {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .dp-band-ad {
-    width: 100%;
-    max-width: 468px;
-    /* Corner buttons end at 12px top + 32px tall; clear them with room over. */
-    margin-top: 56px;
-    /*
-     * Both the row and the order have to be stated. The narrow layout sends the
-     * left rail below the wordmark with `order: 2`, which here would make
-     * auto-placement skip past column 1 and start a second row.
-     */
-    grid-row: 1;
-    order: 0;
-  }
-
-  .dp-band-ad-left {
-    grid-column: 1;
-    justify-self: start;
-  }
-
-  .dp-band-ad-right {
-    grid-column: 3;
-    justify-self: end;
+  .app {
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   .app-footer-ad {
     grid-row: 3;
-  }
-
-  .app {
-    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 }
 
@@ -1184,10 +1115,6 @@
   .app {
     grid-template-columns: 250px minmax(0, 1fr) 330px;
   }
-
-  .dp-band-ad {
-    max-width: 336px;
-  }
 }
 
 /* Below this the three columns stack and the whole page scrolls. */
@@ -1213,16 +1140,6 @@
   .app-footer-ad {
     grid-row: auto;
     margin-top: 4px;
-  }
-
-  /*
-   * One header rail only below this width. Two units in a phone header is more
-   * ad than app, and the second would push the controls off the first screen.
-   * Hidden rather than unmounted: AdSlot waits for a real box before asking
-   * AdSense to fill it, so a resize back to desktop still serves.
-   */
-  .dp-band-ad-right {
-    display: none;
   }
 
   /* Keep the frame out of a notch or home indicator once the page can scroll. */

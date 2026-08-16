@@ -3,7 +3,6 @@ import { useStore } from '../state/store';
 import { VERSIONS } from '../core/versions';
 import { Logo, MCButton, MCPanel } from './mc/MCPrimitives';
 import { MCSelect } from './mc/MCSelect';
-import { AdSlot } from './AdSlot';
 import { AUTHOR } from '../config/links';
 import { isMuted, playClick, setMuted } from '../lib/sfx';
 
@@ -51,26 +50,14 @@ export function TopBar({ onOpenProjects }: { onOpenProjects: () => void }) {
 
   return (
     <div className="topbar">
-      {/*
-       * The wordmark gets its own band, like a Minecraft title screen. On wide
-       * screens the band is the only full-width strip with room to spare, so
-       * the two header ad rails live in the dead space either side of the
-       * wordmark — below the fixed corner buttons rather than beside them, so
-       * neither rail can be caught by a click aimed at Discord or Donate.
-       */}
+      {/* The wordmark gets its own band, like a Minecraft title screen. */}
       <div className="dp-title-band">
-        <AdSlot id="headerLeft" className="dp-band-ad dp-band-ad-left" />
-
-        <div className="dp-title-center">
-          {/* The splash is positioned against the logo, so it tracks its width. */}
-          <div className="dp-logo-wrap">
-            <Logo />
-            <div className="dp-splash">{splash}</div>
-          </div>
-          <div className="dp-credit t-white">Made By {AUTHOR}</div>
+        {/* The splash is positioned against the logo, so it tracks its width. */}
+        <div className="dp-logo-wrap">
+          <Logo />
+          <div className="dp-splash">{splash}</div>
         </div>
-
-        <AdSlot id="headerRight" className="dp-band-ad dp-band-ad-right" />
+        <div className="dp-credit t-white">Made By {AUTHOR}</div>
       </div>
 
       <MCPanel className="topbar-panel">
