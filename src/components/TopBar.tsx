@@ -3,6 +3,7 @@ import { useStore } from '../state/store';
 import { VERSIONS } from '../core/versions';
 import { Logo, MCButton, MCPanel } from './mc/MCPrimitives';
 import { MCSelect } from './mc/MCSelect';
+import { AdSlot } from './AdSlot';
 import { AUTHOR } from '../config/links';
 import { isMuted, playClick, setMuted } from '../lib/sfx';
 
@@ -50,26 +51,36 @@ export function TopBar({ onOpenProjects }: { onOpenProjects: () => void }) {
 
   return (
     <div className="topbar">
-      {/* The wordmark gets its own band, like a Minecraft title screen. */}
+      {/*
+       * The wordmark gets its own band, like a Minecraft title screen. On wide
+       * screens the band is the only full-width strip with room to spare, so
+       * the two header ad rails live in the dead space either side of the
+       * wordmark — below the fixed corner buttons rather than beside them, so
+       * neither rail can be caught by a click aimed at Discord or Donate.
+       */}
       <div className="dp-title-band">
-        {/* The splash is positioned against the logo, so it tracks its width. */}
-        <div className="dp-logo-wrap">
-          <Logo />
-          <div className="dp-splash">{splash}</div>
+        <AdSlot id="headerLeft" className="dp-band-ad dp-band-ad-left" />
+
+        <div className="dp-title-center">
+          {/* The splash is positioned against the logo, so it tracks its width. */}
+          <div className="dp-logo-wrap">
+            <Logo />
+            <div className="dp-splash">{splash}</div>
+          </div>
+          <div className="dp-credit t-white">Made By {AUTHOR}</div>
         </div>
-        <div className="dp-credit t-white">Made By {AUTHOR}</div>
+
+        <AdSlot id="headerRight" className="dp-band-ad dp-band-ad-right" />
       </div>
 
-      <MCPanel style={{ padding: '8px 12px' }}>
-        <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <span className="t-gray" style={{ fontSize: 16 }}>
-              VERSION
-            </span>
+      <MCPanel className="topbar-panel">
+        <div className="row topbar-controls">
+          <div className="row topbar-field topbar-field-version">
+            <span className="t-gray topbar-label">VERSION</span>
             <MCSelect
               value={targetVersion}
               onChange={setVersion}
-              width={196}
+              width="100%"
               label="Target Minecraft version"
               title="Target Minecraft version. Sets pack_format and the texture path names in the exported pack."
               options={VERSIONS.map((v) => ({
@@ -80,13 +91,10 @@ export function TopBar({ onOpenProjects }: { onOpenProjects: () => void }) {
             />
           </div>
 
-          <div className="row" style={{ gap: 6, flex: 1, minWidth: 180 }}>
-            <span className="t-gray" style={{ fontSize: 16 }}>
-              NAME
-            </span>
+          <div className="row topbar-field topbar-field-name">
+            <span className="t-gray topbar-label">NAME</span>
             <input
               className="mc-input"
-              style={{ maxWidth: 240 }}
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               spellCheck={false}
@@ -102,7 +110,7 @@ export function TopBar({ onOpenProjects }: { onOpenProjects: () => void }) {
             saved!
           </span>
 
-          <div className="row">
+          <div className="row topbar-actions">
             <MCButton
               small
               silent

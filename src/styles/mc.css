@@ -476,6 +476,11 @@
  * Title band
  * ------------------------------------------------------------------ */
 
+/*
+ * Narrow layout: a plain centred column. The wide three-column form, with an
+ * ad rail either side of the wordmark, is further down under the 1081px query —
+ * the same width at which the fixed corner buttons drop into the flow.
+ */
 .dp-title-band {
   position: relative;
   display: flex;
@@ -484,6 +489,14 @@
   align-items: center;
   gap: 0;
   padding: 14px 0 16px;
+}
+
+.dp-title-center {
+  order: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
 }
 
 .dp-credit {
@@ -563,6 +576,9 @@
   bottom: 14%;
   margin-left: -18px;
   transform-origin: center;
+  /* Also stated here, not only in the keyframes, so the resting angle survives
+     when prefers-reduced-motion turns the animation off. */
+  transform: rotate(-18deg);
   font-size: 16px;
   line-height: var(--lh-body);
   color: var(--mc-yellow);
@@ -585,30 +601,56 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dp-splash {
-    animation: none;
-    transform: rotate(-18deg);
-  }
+/*
+ * The tucked form, used wherever the splash has no room to sit off the logo's
+ * corner. Hoisted out of the media query it used to live in: keyframes only
+ * apply while their enclosing query matches, and two ranges need these now.
+ */
+@keyframes mc-splash-flat {
+  0%, 50%, 100% { transform: rotate(-6deg) scale(1); }
+  25%, 75% { transform: rotate(-6deg) scale(0.944); }
 }
 
-/* Tuck the splash under the logo once there is no room beside it. */
-@media (max-width: 900px) {
+/*
+ * Tuck the splash under the logo once there is no room beside it — either
+ * because the screen is narrow, or because the header ad rail is occupying
+ * that space. Being absolutely positioned, the splash overflows its column
+ * silently, so it would otherwise print straight over the right-hand rail;
+ * the longest splash string is wider than the clearance even at 1920.
+ */
+@media (max-width: 900px), (min-width: 1081px) {
   .dp-splash {
     position: static;
-    margin-left: 0;
     left: auto;
+    /*
+     * Rotation is not part of layout, so a 24px line box of angled text still
+     * paints ~12px above and below it — enough to land on the credit line
+     * underneath. This margin is that overhang, reserved by hand.
+     */
+    margin: 12px 0;
+    /* No longer anchored to the logo's corner, so centre it under the letters. */
+    text-align: center;
     transform: rotate(-6deg);
     animation-name: mc-splash-flat;
     animation-duration: 2.6s;
   }
-  @keyframes mc-splash-flat {
-    0%, 50%, 100% { transform: rotate(-6deg) scale(1); }
-    25%, 75% { transform: rotate(-6deg) scale(0.944); }
-  }
+}
+
+@media (max-width: 900px) {
   .dp-title-band {
     flex-direction: column;
     gap: 8px;
+  }
+}
+
+/*
+ * Last, so it wins over the animation-name the tuck sets above. Only the
+ * animation is dropped — the resting rotation comes from whichever layout rule
+ * applied, so the splash keeps its angle either way.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .dp-splash {
+    animation: none;
   }
 }
 
@@ -641,7 +683,21 @@
 /* Below this the wordmark reaches the corners, so let them sit in the flow. */
 @media (max-width: 1080px) {
   .corner {
-    position: static;
+    /*
+     * Relative, not static: the dirt backdrop is position:fixed with z-index 0,
+     * and a positioned element paints over in-flow content whatever the
+     * in-flow element's own z-index says. Going static here dropped these
+     * buttons behind the background entirely.
+     */
+    position: relative;
+    /*
+     * The corner offsets are inset properties, which a fixed box ignores only
+     * while static — under relative they become relative shifts and push these
+     * rows off both edges of the screen.
+     */
+    top: auto;
+    left: auto;
+    right: auto;
     justify-content: center;
     flex-direction: row;
     flex-wrap: wrap;
@@ -735,6 +791,38 @@
   height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
+}
+
+.editor-head {
+  padding: 8px 10px;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 2px solid #101010;
+}
+
+/*
+ * Truncates rather than pushing. Asset names run long, and this row carries the
+ * only two ways out of the editor — letting the title size the row shoved
+ * Cancel past the edge of the panel, where it could not be clicked at all.
+ */
+.editor-head-title {
+  font-size: 24px;
+  line-height: var(--lh-title);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-head-dims {
+  font-size: 16px;
+  flex: none;
+}
+
+.editor-head-actions {
+  margin-left: auto;
+  gap: 6px;
+  flex: none;
 }
 
 .editor-body {
@@ -889,7 +977,43 @@
   gap: 8px;
 }
 
+/* ---- Top bar controls ---------------------------------------------- */
 
+/*
+ * Sized in CSS rather than inline so the phone breakpoint can reach them —
+ * an inline width would win over any media query.
+ */
+.topbar-panel {
+  padding: 8px 12px;
+}
+
+.topbar-controls {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.topbar-label {
+  font-size: 16px;
+}
+
+.topbar-field {
+  gap: 6px;
+}
+
+/* flex-basis, not width: MCSelect sets an inline width that CSS cannot beat. */
+.topbar-field-version .mc-select-root {
+  flex: 1 1 196px;
+  max-width: 196px;
+}
+
+.topbar-field-name {
+  flex: 1;
+  min-width: 180px;
+}
+
+.topbar-field-name .mc-input {
+  max-width: 240px;
+}
 
 .empty-hint {
   padding: 24px 16px;
@@ -900,23 +1024,348 @@
   line-height: var(--lh-body);
 }
 
+/* ------------------------------------------------------------------ *
+ * Ad units
+ *
+ * Every placement flows inside the layout — none of them float, overlay or
+ * stick. Two rules keep them out of the way: they only ever sit in space the
+ * app was not using, and they keep a clear gap from any button, so a click
+ * aimed at the UI can never land on an ad.
+ * ------------------------------------------------------------------ */
+
+.ad-slot {
+  display: block;
+  min-width: 0;
+  /* Never let a wide unit push a grid column past its track. */
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.ad-slot-label {
+  display: block;
+  font-size: 16px;
+  line-height: var(--lh-body);
+  text-align: center;
+  color: var(--mc-gray);
+  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
+  opacity: 0.7;
+}
+
+.ad-slot-ins {
+  display: block;
+  width: 100%;
+}
+
+/* Dev-only outline for a placement with no slot id yet. */
+.ad-slot-empty {
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  padding: 8px;
+  text-align: center;
+  border: var(--px) dashed #6b6b6b;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 16px;
+  line-height: var(--lh-body);
+}
+
+.ad-slot-note {
+  opacity: 0.6;
+}
+
+/* ---- Header rails -------------------------------------------------- */
+
+/*
+ * Narrow: one rail only, tucked under the wordmark. Two units in a phone
+ * header is more ad than app, and the second would push the controls below
+ * the fold on a short screen.
+ */
+.dp-band-ad-left {
+  order: 2;
+  width: 100%;
+  max-width: 468px;
+  margin-top: 12px;
+}
+
+/* ---- Footer -------------------------------------------------------- */
+
+.app-footer-ad {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 970px;
+  margin: 0 auto;
+}
+
+/* ---- Donate screen ------------------------------------------------- */
+
+.screen-ad {
+  width: min(336px, 88vw);
+  /* Deliberately generous: the buttons above and Back below are both live. */
+  margin: 28px 0 4px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Responsive layout
+ * ------------------------------------------------------------------ */
+
+/*
+ * Wide: the wordmark sits in the middle track with an ad rail either side.
+ * The rails are pushed down clear of the fixed corner buttons rather than
+ * placed beside them.
+ */
+@media (min-width: 1081px) {
+  .dp-title-band {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: end;
+    gap: 20px;
+    padding: 14px 16px 16px;
+  }
+
+  .dp-title-center {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .dp-band-ad {
+    width: 100%;
+    max-width: 468px;
+    /* Corner buttons end at 12px top + 32px tall; clear them with room over. */
+    margin-top: 56px;
+    /*
+     * Both the row and the order have to be stated. The narrow layout sends the
+     * left rail below the wordmark with `order: 2`, which here would make
+     * auto-placement skip past column 1 and start a second row.
+     */
+    grid-row: 1;
+    order: 0;
+  }
+
+  .dp-band-ad-left {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .dp-band-ad-right {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .app-footer-ad {
+    grid-row: 3;
+  }
+
+  .app {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+}
+
+/*
+ * A short desktop viewport has no height to spare — the columns are already
+ * the smallest useful size, so the footer unit goes rather than squeezing them.
+ */
+@media (min-width: 1081px) and (max-height: 760px) {
+  .app-footer-ad {
+    display: none;
+  }
+}
+
 @media (max-width: 1440px) {
   .app {
     grid-template-columns: 290px minmax(0, 1fr) 380px;
   }
 }
 
+/*
+ * Between the wide and stacked layouts the side columns have to give ground,
+ * or the middle one collapses to two or three slot cells per row.
+ */
+@media (max-width: 1280px) {
+  .app {
+    grid-template-columns: 250px minmax(0, 1fr) 330px;
+  }
+
+  .dp-band-ad {
+    max-width: 336px;
+  }
+}
+
+/* Below this the three columns stack and the whole page scrolls. */
 @media (max-width: 1080px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: none;
+    grid-auto-rows: auto;
     height: auto;
     min-height: 100%;
   }
+
   body {
     overflow: auto;
+    /* Nothing here is meant to scroll sideways; a stray wide child would. */
+    overflow-x: hidden;
   }
+
   .scroll {
     max-height: 50vh;
+  }
+
+  .app-footer-ad {
+    grid-row: auto;
+    margin-top: 4px;
+  }
+
+  /*
+   * One header rail only below this width. Two units in a phone header is more
+   * ad than app, and the second would push the controls off the first screen.
+   * Hidden rather than unmounted: AdSlot waits for a real box before asking
+   * AdSense to fill it, so a resize back to desktop still serves.
+   */
+  .dp-band-ad-right {
+    display: none;
+  }
+
+  /* Keep the frame out of a notch or home indicator once the page can scroll. */
+  .app {
+    padding-left: max(6px, env(safe-area-inset-left));
+    padding-right: max(6px, env(safe-area-inset-right));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .corner {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+}
+
+/* ---- Tablets and large phones -------------------------------------- */
+
+@media (max-width: 720px) {
+  .app {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  /* Three stacked panels at half the viewport each is a long way to scroll. */
+  .scroll {
+    max-height: 62vh;
+  }
+
+  .dp-title-band {
+    padding: 10px 0 12px;
+  }
+
+  .screen-inner {
+    padding: 28px 16px;
+  }
+
+  .editor-overlay {
+    padding: 8px;
+  }
+}
+
+/* ---- Phones -------------------------------------------------------- */
+
+@media (max-width: 560px) {
+  /*
+   * The controls stop fitting on one line. Each field takes a full row so its
+   * label stays beside it, and the buttons share the row underneath rather
+   * than each wrapping onto a line of its own.
+   */
+  .topbar-field {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .topbar-field-version .mc-select-root,
+  .topbar-field-name .mc-input {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .topbar-actions .mc-btn {
+    flex: 1 1 auto;
+  }
+
+  .mc-btn {
+    padding: 0 12px;
+  }
+
+  .mc-btn-sm {
+    padding: 0 10px;
+  }
+
+  .section-title {
+    padding: 6px 8px 4px;
+  }
+
+  .scroll {
+    max-height: 70vh;
+  }
+
+  /* A 268px sidebar beside a canvas leaves neither of them usable. */
+  .editor-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  /* Title on its own line, then the two exits sharing the one below it. */
+  .editor-head-title {
+    flex: 1 1 100%;
+    font-size: 16px;
+    line-height: var(--lh-body);
+  }
+
+  .editor-head-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .editor-head-actions .mc-btn {
+    flex: 1 1 auto;
+  }
+
+  .editor-side {
+    border-right: none;
+    border-bottom: 2px solid #101010;
+    max-height: 42vh;
+  }
+
+  .editor-shell {
+    height: min(92vh, 760px);
+  }
+
+  .editor-stage {
+    padding: 8px;
+  }
+
+  .screen-title {
+    font-size: 16px;
+    line-height: var(--lh-body);
+  }
+}
+
+/* ---- Touch --------------------------------------------------------- */
+
+/*
+ * Fingers need a bigger target than a mouse. Raising the small button and the
+ * slot cell is enough — everything else is already past 36px.
+ */
+@media (pointer: coarse) {
+  .mc-btn-sm {
+    min-height: 40px;
+  }
+
+  .mc-select-option {
+    min-height: 40px;
+  }
+
+  .mc-check-box {
+    width: 20px;
+    height: 20px;
   }
 }

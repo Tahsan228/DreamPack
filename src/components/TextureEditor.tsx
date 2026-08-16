@@ -419,15 +419,13 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     <div className="editor-overlay" role="dialog" aria-modal="true" aria-label="Texture editor">
       <div className="mc-panel-dark editor-shell">
         {/* Header */}
-        <div className="row" style={{ padding: '8px 10px', borderBottom: '2px solid #101010', gap: 10 }}>
-          <span className="t-yellow" style={{ fontSize: 24, lineHeight: 'var(--lh-title)' }}>
-            Editing: {slot.displayName}
-          </span>
-          <span className="t-gray" style={{ fontSize: 16 }}>
+        <div className="row editor-head">
+          <span className="t-yellow editor-head-title">Editing: {slot.displayName}</span>
+          <span className="t-gray editor-head-dims">
             {dims ? `${dims.width}×${dims.height}` : '…'}
             {dirty ? ' · unsaved' : ''}
           </span>
-          <div className="row" style={{ marginLeft: 'auto', gap: 6 }}>
+          <div className="row editor-head-actions">
             <MCButton variant="primary" onClick={() => void handleSave()} disabled={!dims || saving}>
               {saving ? 'Saving…' : 'Save & Exit'}
             </MCButton>

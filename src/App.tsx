@@ -12,6 +12,7 @@ import { TextureEditor } from './components/TextureEditor';
 import { LoadingScreen, type BootState } from './components/LoadingScreen';
 import { CornerLinks } from './components/CornerLinks';
 import { DonatePage } from './components/DonatePage';
+import { AdSlot } from './components/AdSlot';
 import { preloadSounds } from './lib/sfx';
 
 /** Floor on each boot step, so the bar and its phase label are legible. */
@@ -95,6 +96,12 @@ export function App() {
             <Viewport />
           </>
         )}
+        {/*
+         * Last row of the app grid rather than a fixed overlay, so it never
+         * covers the columns — on a short desktop viewport it drops out
+         * entirely instead of eating height the editor needs.
+         */}
+        <AdSlot id="footer" className="app-footer-ad" />
       </div>
       <ExportDialog />
       {showProjects && <ProjectsDialog onClose={() => setShowProjects(false)} />}

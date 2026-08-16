@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Logo, MCButton } from './mc/MCPrimitives';
 import { LINK_ICONS } from './mc/icons';
 import { configured, DONATIONS, SOCIALS } from '../config/links';
+import { anyAdConfigured } from '../config/ads';
+import { AdSlot } from './AdSlot';
 import { playThud } from '../lib/sfx';
 
 /**
@@ -11,6 +13,7 @@ import { playThud } from '../lib/sfx';
 export function DonatePage({ onClose }: { onClose: () => void }) {
   const options = configured(DONATIONS);
   const socials = configured(SOCIALS);
+  const ads = anyAdConfigured();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,8 +38,12 @@ export function DonatePage({ onClose }: { onClose: () => void }) {
         <h1 className="t-yellow screen-title">Support DreamPack</h1>
 
         <p className="screen-body">
-          DreamPack is free, runs entirely in your browser, and has no ads,
-          accounts or tracking. It is made in spare time.
+          {/* Hyphen, not an em dash: Minecraftia has no glyph for one. */}
+          DreamPack is free, needs no account, and runs entirely in your
+          browser - your packs never leave your machine.
+          {/* Only claimed once a unit is actually live, so the copy can never
+              promise ads that are not there or deny ads that are. */}
+          {ads ? ' A few ads cover the hosting.' : ''} It is made in spare time.
         </p>
         <p className="screen-body t-gray">
           If it saved you an afternoon of unzipping packs by hand, a tip helps
@@ -88,6 +95,14 @@ export function DonatePage({ onClose }: { onClose: () => void }) {
         <MCButton onClick={back} style={{ marginTop: 24, minWidth: 260 }}>
           Back
         </MCButton>
+
+        {/*
+         * Last, and well clear of Back. Above it the unit sat between two rows
+         * of live buttons — the accidental-click layout AdSense suspends
+         * accounts over — and on a phone it pushed Back off screen, which is
+         * the only way out of this menu when there is no Escape key.
+         */}
+        <AdSlot id="donate" className="screen-ad" />
       </div>
     </div>
   );
