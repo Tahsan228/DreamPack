@@ -1,0 +1,41 @@
+/*
+ * Minecraftia by Andrew Tyler (www.AndrewTyler.net, font@andrewtyler.net).
+ * Bundled from the archive supplied with this project; see
+ * src/assets/fonts/MINECRAFTIA-LICENSE.txt.
+ *
+ * SIZE
+ * The glyph coordinates share a GCD of 192 units against an em of 1536, so one
+ * design pixel is 192 units and the em is 8 design pixels. Only multiples of 8px
+ * put a design pixel on whole screen pixels; 16px (2x) and 24px (3x) are used.
+ *
+ * VERTICAL METRICS  (run `node scripts/font-metrics.mjs` to re-derive)
+ * The font's own metrics are unusable: hhea stores a *positive* descender, OS/2
+ * winDescent is a negative value written into an unsigned field, and the ascent
+ * (1.75em) is taller than the ink. Browsers therefore reserve descent space the
+ * font never uses and leave the glyphs riding high — text drifts to the top of
+ * every button with a dead gap underneath.
+ *
+ * Measured, the ink is far tidier than the tables suggest: every glyph sits
+ * between 0.5em and 1.5em above the baseline, exactly 1em tall, with nothing
+ * below the baseline at all. So the ink centre is 1.0em up.
+ *
+ * `descent-override` cannot be negative, so the box is made symmetric by pinning
+ * the descent at 0 and setting the ascent to twice the ink centre:
+ *
+ *     ascent 2em, descent 0  ->  ink at 0.5em..1.5em  ->  0.5em clear each side
+ *
+ * The content box is then 2em (32px at body size, 48px at title size), and any
+ * even line-height keeps half-leading a whole number, so baselines stay on the
+ * pixel grid. This is what makes text sit centred everywhere without a single
+ * per-component nudge.
+ */
+@font-face {
+  font-family: 'Minecraftia';
+  src: url('../assets/fonts/Minecraftia-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  ascent-override: 200%;
+  descent-override: 0%;
+  line-gap-override: 0%;
+}

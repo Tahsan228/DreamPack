@@ -1,0 +1,118 @@
+/*
+ * Minecraft GUI palette and metrics. Nothing here is Mojang artwork — the
+ * surfaces are CSS and runtime-generated noise.
+ *
+ * TYPE SCALE
+ * Minecraftia's coordinates share a GCD of 192 units against an em of 1536, so
+ * one design pixel is 192 units and the em is 8 design pixels. Only font sizes
+ * that are multiples of 8 land on whole screen pixels; anything else makes the
+ * rasteriser snap stems unevenly (some 1px, some 2px) once anti-aliasing is off.
+ *
+ *   16px = 2x design scale  <- body, same chunkiness as Minecraft's GUI Scale 2
+ *   24px = 3x design scale  <- panel titles
+ *
+ * One design pixel is therefore 2 screen pixels at body size, which is also the
+ * bevel width (--px) and the text-shadow offset.
+ */
+:root {
+  --mc-panel: #c6c6c6;
+  --mc-panel-dark: #8b8b8b;
+  --mc-panel-darker: #555555;
+  --mc-panel-light: #ffffff;
+
+  --mc-slot: #8b8b8b;
+  --mc-slot-shadow: #373737;
+  --mc-slot-hover: #b9b9b9;
+
+  --mc-bg: #1d1d1d;
+
+  /*
+   * Text colours with their Minecraft shadows. The game derives a shadow as
+   * `(colour & 0xFCFCFC) >> 2` — a quarter of the foreground, not a fixed grey —
+   * which is why coloured text has a *tinted* shadow. Each pair below is the
+   * colour and its exact >>2 value.
+   */
+  --mc-white: #ffffff;      --mc-white-sh: #3f3f3f;
+  --mc-gray: #a0a0a0;       --mc-gray-sh: #282828;
+  --mc-dgray: #555555;      --mc-dgray-sh: #151515;
+  --mc-yellow: #ffff55;     --mc-yellow-sh: #3f3f15;
+  --mc-green: #55ff55;      --mc-green-sh: #153f15;
+  --mc-aqua: #55ffff;       --mc-aqua-sh: #153f3f;
+  --mc-red: #ff5555;        --mc-red-sh: #3f1515;
+  --mc-gold: #ffaa00;       --mc-gold-sh: #3f2a00;
+  --mc-purple: #ff55ff;     --mc-purple-sh: #3f153f;
+
+  /* Legacy aliases still referenced by inline styles. */
+  --mc-text: var(--mc-white);
+  --mc-text-dim: var(--mc-gray);
+  --mc-text-dark: #3f3f3f;
+
+  --mc-xp: #80ff20;
+  --mc-xp-track: #2d2d2d;
+
+  /* One Minecraft pixel at body scale: bevels, shadow offset, gaps. */
+  --px: 2px;
+  --font-mc: 'Minecraftia', 'Courier New', monospace;
+
+  /*
+   * Line boxes. With the metric overrides in fonts.css the content box is a flat
+   * 2em — 32px at body size, 48px at title size — so ANY even line-height keeps
+   * half-leading a whole number and the ink dead-centred. Both values below are
+   * even for that reason; changing them to an odd number reintroduces
+   * half-pixel baselines and the type goes soft again.
+   */
+  --lh-body: 24px;
+  --lh-title: 36px;
+
+  /* Filled by installTextures() at startup. */
+  --mc-grain: none;
+  --mc-dirt: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--mc-bg);
+  color: var(--mc-white);
+  font-family: var(--font-mc);
+  font-size: 16px;
+  line-height: var(--lh-body);
+  /* No tracking: fractional letter spacing puts glyphs on subpixel positions. */
+  letter-spacing: 0;
+  overflow: hidden;
+  /* The font's designer asks for anti-aliasing off, which keeps edges square. */
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}
+
+img,
+canvas {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--mc-panel-dark);
+  border: 2px solid #1a1a1a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mc-panel);
+}

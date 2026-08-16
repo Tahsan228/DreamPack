@@ -1,0 +1,922 @@
+/* ------------------------------------------------------------------ *
+ * Minecraft GUI primitives
+ * ------------------------------------------------------------------ */
+
+/*
+ * Text shadow, the Minecraft way: offset by exactly one design pixel down-right,
+ * in a colour that is a quarter of the foreground rather than a flat grey. Use
+ * the .t-* helpers so the pair always stays matched.
+ */
+.mc-text-shadow,
+.t-white { color: var(--mc-white); text-shadow: var(--px) var(--px) 0 var(--mc-white-sh); }
+.t-gray,
+.dim { color: var(--mc-gray); text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh); }
+.t-yellow { color: var(--mc-yellow); text-shadow: var(--px) var(--px) 0 var(--mc-yellow-sh); }
+.t-green { color: var(--mc-green); text-shadow: var(--px) var(--px) 0 var(--mc-green-sh); }
+.t-aqua { color: var(--mc-aqua); text-shadow: var(--px) var(--px) 0 var(--mc-aqua-sh); }
+.t-red { color: var(--mc-red); text-shadow: var(--px) var(--px) 0 var(--mc-red-sh); }
+.t-gold { color: var(--mc-gold); text-shadow: var(--px) var(--px) 0 var(--mc-gold-sh); }
+
+/* Raised panel: light top/left, dark bottom/right, like every MC container. */
+.mc-panel {
+  background-color: var(--mc-panel);
+  background-image: var(--mc-grain);
+  background-size: 32px 32px;
+  background-blend-mode: soft-light;
+  opacity: 1;
+  border-style: solid;
+  border-width: var(--px);
+  border-color: var(--mc-panel-light) var(--mc-panel-darker) var(--mc-panel-darker)
+    var(--mc-panel-light);
+  color: var(--mc-text-dark);
+}
+
+/* Dark chrome variant used for the app frame. */
+.mc-panel-dark {
+  background-color: rgba(8, 8, 8, 0.5);
+  border: var(--px) solid #000000;
+  box-shadow:
+    inset var(--px) var(--px) 0 rgba(255, 255, 255, 0.09),
+    inset calc(var(--px) * -1) calc(var(--px) * -1) 0 rgba(0, 0, 0, 0.55);
+}
+
+/* Sunken inset, used for slots and text fields. */
+.mc-inset {
+  background-color: var(--mc-slot);
+  background-image: var(--mc-grain);
+  background-size: 32px 32px;
+  background-blend-mode: soft-light;
+  border-style: solid;
+  border-width: var(--px);
+  border-color: var(--mc-slot-shadow) var(--mc-panel-light) var(--mc-panel-light)
+    var(--mc-slot-shadow);
+}
+
+/* ---- Buttons ------------------------------------------------------ */
+
+/*
+ * A widgets.png button: black outline, a lighter inner top edge, a darker inner
+ * bottom edge, a vertical gradient face, and grain over the whole thing. Flex
+ * centring keeps the label true regardless of the font's vertical metrics.
+ */
+.mc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Flex collapses whitespace-only text between children, so the space in
+     `{label} <span>{count}</span>` disappears. Gap puts it back. */
+  gap: 8px;
+  font-family: var(--font-mc);
+  font-size: 16px;
+  line-height: var(--lh-body);
+  /* Minecraft buttons are generously padded and never crowd each other. */
+  min-height: 36px;
+  padding: 0 20px;
+  margin: 0;
+
+  color: var(--mc-white);
+  text-shadow: var(--px) var(--px) 0 var(--mc-white-sh);
+
+  background-color: #8b8b8b;
+  background-image: var(--mc-grain), linear-gradient(#a6a6a6 0%, #8b8b8b 46%, #5f5f5f 100%);
+  background-size: 32px 32px, auto;
+  background-blend-mode: soft-light, normal;
+
+  border: var(--px) solid #000000;
+  /* Inner bevel, drawn as insets so the outline stays a clean single pixel. */
+  box-shadow:
+    inset var(--px) var(--px) 0 rgba(255, 255, 255, 0.28),
+    inset calc(var(--px) * -1) calc(var(--px) * -1) 0 rgba(0, 0, 0, 0.42);
+
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Vanilla highlights a hovered button with a blue-white face and yellow label. */
+.mc-btn:hover:not(:disabled) {
+  color: var(--mc-yellow);
+  text-shadow: var(--px) var(--px) 0 var(--mc-yellow-sh);
+  background-image: var(--mc-grain), linear-gradient(#c2cee4 0%, #a3b0c9 46%, #7482a0 100%);
+}
+
+.mc-btn:active:not(:disabled) {
+  background-image: var(--mc-grain), linear-gradient(#6f6f6f 0%, #7d7d7d 52%, #8b8b8b 100%);
+  box-shadow:
+    inset var(--px) var(--px) 0 rgba(0, 0, 0, 0.42),
+    inset calc(var(--px) * -1) calc(var(--px) * -1) 0 rgba(255, 255, 255, 0.22);
+}
+
+.mc-btn:disabled {
+  color: var(--mc-gray);
+  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
+  background-image: var(--mc-grain), linear-gradient(#565656 0%, #4a4a4a 100%);
+  box-shadow: inset var(--px) var(--px) 0 rgba(255, 255, 255, 0.10);
+  cursor: not-allowed;
+}
+
+.mc-btn:focus-visible {
+  outline: var(--px) solid var(--mc-yellow);
+  outline-offset: var(--px);
+}
+
+.mc-btn-primary {
+  background-image: var(--mc-grain), linear-gradient(#5a9c5a 0%, #4a8a4a 48%, #3a6e3a 100%);
+}
+.mc-btn-primary:hover:not(:disabled) {
+  background-image: var(--mc-grain), linear-gradient(#6fb86f 0%, #5aa25a 48%, #468446 100%);
+}
+
+.mc-btn-danger:hover:not(:disabled) {
+  background-image: var(--mc-grain), linear-gradient(#c05a5a 0%, #a84545 48%, #8a3535 100%);
+  color: #ffdddd;
+  text-shadow: var(--px) var(--px) 0 #3f3535;
+}
+
+/* Compact variant, still an even height so the label stays pixel-aligned. */
+/* Compact variant, but still roomy: these are the buttons used in the densest
+   parts of the UI, so cramped padding is where it shows first. */
+.mc-btn-sm {
+  min-height: 32px;
+  padding: 0 16px;
+  gap: 8px;
+  line-height: 20px;
+}
+
+/* ---- Dropdown ------------------------------------------------------ */
+
+.mc-select-root {
+  position: relative;
+}
+
+.mc-select-btn {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 12px 0 14px;
+}
+
+.mc-select-btn.is-open {
+  color: var(--mc-yellow);
+  text-shadow: var(--px) var(--px) 0 var(--mc-yellow-sh);
+}
+
+.mc-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Solid triangle, drawn with borders since the font has no arrow glyph. */
+.mc-select-arrow {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+}
+
+.mc-select-btn.is-open .mc-select-arrow {
+  border-top: none;
+  border-bottom: 6px solid currentColor;
+}
+
+.mc-select-list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + var(--px));
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: var(--px);
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #0b0b0b;
+  border: var(--px) solid #000000;
+  box-shadow: 0 0 0 var(--px) rgba(255, 255, 255, 0.22), 0 6px 0 rgba(0, 0, 0, 0.45);
+}
+
+.mc-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px;
+  font-family: var(--font-mc);
+  font-size: 16px;
+  line-height: var(--lh-body);
+  text-align: left;
+  color: var(--mc-white);
+  text-shadow: var(--px) var(--px) 0 var(--mc-white-sh);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+/* Minecraft highlights the row under the cursor rather than the selected one. */
+.mc-select-option.is-active {
+  background: #3a7d3a;
+  color: var(--mc-yellow);
+  text-shadow: var(--px) var(--px) 0 var(--mc-yellow-sh);
+}
+
+.mc-select-option.is-selected::before {
+  content: '>';
+  margin-right: 4px;
+  color: var(--mc-yellow);
+}
+
+.mc-select-hint {
+  color: var(--mc-gray);
+  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
+}
+
+.mc-select-option.is-active .mc-select-hint {
+  color: #d8ecd8;
+  text-shadow: var(--px) var(--px) 0 #364a36;
+}
+
+/* ---- Form controls ------------------------------------------------ */
+
+.mc-input,
+.mc-select {
+  font-family: var(--font-mc);
+  font-size: 16px;
+  line-height: var(--lh-body);
+  height: 32px;
+  color: var(--mc-white);
+  text-shadow: var(--px) var(--px) 0 var(--mc-white-sh);
+  background: #0b0b0b;
+  border: var(--px) solid #a0a0a0;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.mc-input:focus,
+.mc-select:focus {
+  outline: none;
+  border-color: var(--mc-white);
+}
+
+.mc-select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, #ffffff 50%),
+    linear-gradient(135deg, #ffffff 50%, transparent 50%);
+  background-position: calc(100% - 16px) 14px, calc(100% - 10px) 14px;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.mc-select option {
+  background: #0b0b0b;
+  color: var(--mc-white);
+  text-shadow: none;
+}
+
+.mc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--mc-white);
+  text-shadow: var(--px) var(--px) 0 var(--mc-white-sh);
+  font-size: 16px;
+  line-height: var(--lh-body);
+  white-space: nowrap;
+}
+
+.mc-check-box {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: #0b0b0b;
+  border: var(--px) solid #a0a0a0;
+  display: block;
+  position: relative;
+}
+
+/* Filled inner square instead of a tick glyph, which the pixel font lacks. */
+.mc-check-box.is-on::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  background: var(--mc-green);
+  box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.mc-check:hover .mc-check-box {
+  border-color: var(--mc-white);
+}
+
+/* ---- Slots -------------------------------------------------------- */
+
+.mc-slot {
+  position: relative;
+  background: var(--mc-slot);
+  border-style: solid;
+  border-width: var(--px);
+  border-color: var(--mc-slot-shadow) var(--mc-panel-light) var(--mc-panel-light)
+    var(--mc-slot-shadow);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mc-slot:hover {
+  background: var(--mc-slot-hover);
+}
+
+.mc-slot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0);
+  pointer-events: none;
+  transition: background 60ms linear;
+}
+
+.mc-slot:hover::after {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.mc-slot-selected {
+  box-shadow: 0 0 0 var(--px) var(--mc-yellow);
+  z-index: 1;
+}
+
+/* Fixed 32px box: a 16x texture lands on an exact 2:1 scale, never fractional. */
+.mc-slot img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Small corner dot showing which pack supplies this slot. */
+.mc-pip {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+
+/*
+ * Marks a slot you picked by hand. Drawn as a CSS corner wedge rather than a
+ * star glyph, which the pixel font does not include.
+ */
+.mc-star {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 10px solid var(--mc-yellow);
+  border-right: 10px solid transparent;
+  pointer-events: none;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.6));
+}
+
+/* ---- Progress ----------------------------------------------------- */
+
+.mc-progress {
+  height: 12px;
+  background: var(--mc-xp-track);
+  border: var(--px) solid #000;
+  overflow: hidden;
+}
+
+.mc-progress-fill {
+  height: 100%;
+  background: var(--mc-xp);
+  transition: width 120ms linear;
+}
+
+/* ---- Checkerboard for transparent textures ------------------------ */
+
+.mc-checker {
+  background-image: linear-gradient(45deg, #5a5a5a 25%, transparent 25%),
+    linear-gradient(-45deg, #5a5a5a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #5a5a5a 75%),
+    linear-gradient(-45deg, transparent 75%, #5a5a5a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-color: #6e6e6e;
+}
+
+/* ------------------------------------------------------------------ *
+ * Loading screen
+ * ------------------------------------------------------------------ */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  /* Same dimmed dirt as the app behind it, so the handover is seamless. */
+  background-color: #1d1d1d;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.62)), var(--mc-dirt);
+  background-size: auto, 48px 48px;
+  image-rendering: pixelated;
+  transition: opacity 420ms ease-out;
+}
+
+.boot.is-done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px;
+}
+
+/* Minecraft's loading bar: hard black frame, dark track, bright fill. */
+.boot-bar {
+  width: min(420px, 76vw);
+  height: 16px;
+  background: #0b0b0b;
+  border: var(--px) solid #000000;
+  box-shadow: 0 0 0 var(--px) rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.boot-bar-fill {
+  height: 100%;
+  background: linear-gradient(#9bff6b 0%, var(--mc-xp) 55%, #56c410 100%);
+  box-shadow: inset 0 calc(var(--px) * -1) 0 rgba(0, 0, 0, 0.3);
+  transition: width 260ms ease-out;
+}
+
+.boot-phase {
+  font-size: 16px;
+  line-height: var(--lh-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot,
+  .boot-bar-fill {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Title band
+ * ------------------------------------------------------------------ */
+
+.dp-title-band {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0;
+  padding: 14px 0 16px;
+}
+
+.dp-credit {
+  font-size: 16px;
+  line-height: var(--lh-body);
+  /* The logo PNG carries transparent padding under the wordmark, so the credit
+     needs pulling up towards the letters rather than the file's edge. */
+  margin-top: -2px;
+  /*
+   * Breathes on scale, like the splash text but slower and shallower. The
+   * intermediate sizes fall between the font's 8px steps, so the glyphs soften
+   * slightly at the peak - the swing is kept small to limit that.
+   */
+  transform-origin: center;
+  animation: dp-credit-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes dp-credit-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-credit {
+    animation: none;
+  }
+}
+
+.dp-logo-img {
+  width: auto;
+  max-width: min(560px, 82vw);
+  height: auto;
+  max-height: 104px;
+  object-fit: contain;
+  /* Keep the pixel edges hard, and lift it off the dirt a little. */
+  image-rendering: pixelated;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.55));
+}
+
+/*
+ * Fallback wordmark, used only if public/logo.png is missing. Layered
+ * text-shadows fake the extruded 3D letters of the real logo.
+ */
+.dp-logo-text {
+  font-family: var(--font-mc);
+  color: #d5d1c9;
+  line-height: 1;
+  text-shadow:
+    2px 2px 0 #6f6b64, 4px 4px 0 #5b5851, 6px 6px 0 #46443f,
+    8px 8px 0 #34322e, 10px 10px 0 #232220, 12px 12px 0 #171615,
+    14px 14px 12px rgba(0, 0, 0, 0.6);
+}
+
+/*
+ * Splash text, sitting off the logo's bottom-right corner exactly like the
+ * title screen. Minecraft animates it as
+ *
+ *   scale = 1.8 - abs(sin((ms % 1000) / 1000 * 2PI)) * 0.1
+ *
+ * which is two pulses a second between 1.8 and 1.7 — a 5.6% swing. The
+ * keyframes below reproduce that curve as a ratio of the resting size.
+ */
+.dp-logo-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.dp-splash {
+  position: absolute;
+  left: 100%;
+  bottom: 14%;
+  margin-left: -18px;
+  transform-origin: center;
+  font-size: 16px;
+  line-height: var(--lh-body);
+  color: var(--mc-yellow);
+  text-shadow: var(--px) var(--px) 0 var(--mc-yellow-sh);
+  pointer-events: none;
+  white-space: nowrap;
+  /* Slower than the game's 1s loop, which is restless on a page you sit on. */
+  animation: mc-splash 2.6s ease-in-out infinite;
+}
+
+@keyframes mc-splash {
+  0%,
+  50%,
+  100% {
+    transform: rotate(-18deg) scale(1);
+  }
+  25%,
+  75% {
+    transform: rotate(-18deg) scale(0.944);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-splash {
+    animation: none;
+    transform: rotate(-18deg);
+  }
+}
+
+/* Tuck the splash under the logo once there is no room beside it. */
+@media (max-width: 900px) {
+  .dp-splash {
+    position: static;
+    margin-left: 0;
+    left: auto;
+    transform: rotate(-6deg);
+    animation-name: mc-splash-flat;
+    animation-duration: 2.6s;
+  }
+  @keyframes mc-splash-flat {
+    0%, 50%, 100% { transform: rotate(-6deg) scale(1); }
+    25%, 75% { transform: rotate(-6deg) scale(0.944); }
+  }
+  .dp-title-band {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Corner links
+ * ------------------------------------------------------------------ */
+
+/*
+ * Fixed to the screen's top corners, either side of the centred wordmark -
+ * the only part of the header with room to spare.
+ */
+.corner {
+  position: fixed;
+  top: 12px;
+  z-index: 30;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.corner-left {
+  left: 12px;
+  flex-direction: column;
+}
+
+.corner-right {
+  right: 12px;
+}
+
+/* Below this the wordmark reaches the corners, so let them sit in the flow. */
+@media (max-width: 1080px) {
+  .corner {
+    position: static;
+    justify-content: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0 8px 8px;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Full-screen menu (donate)
+ * ------------------------------------------------------------------ */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow-y: auto;
+  background-color: #1d1d1d;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.7)), var(--mc-dirt);
+  background-size: auto, 48px 48px;
+  image-rendering: pixelated;
+}
+
+.screen-inner {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.screen-title {
+  margin: 8px 0 0;
+  font-size: 24px;
+  line-height: var(--lh-title);
+  font-weight: 400;
+}
+
+.screen-body {
+  margin: 0;
+  max-width: 620px;
+  font-size: 16px;
+  line-height: var(--lh-body);
+  color: var(--mc-white);
+  text-shadow: var(--px) var(--px) 0 var(--mc-white-sh);
+}
+
+/* Minecraft menus stack full-width buttons down the middle. */
+.screen-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(340px, 88vw);
+}
+
+.screen-buttons .mc-btn {
+  width: 100%;
+}
+
+.screen-soon {
+  font-size: 16px;
+  line-height: var(--lh-body);
+}
+
+.screen-note {
+  padding: 14px 18px;
+  max-width: 520px;
+  font-size: 16px;
+  line-height: var(--lh-body);
+}
+
+/* ------------------------------------------------------------------ *
+ * Texture editor
+ * ------------------------------------------------------------------ */
+
+.editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.78);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.editor-shell {
+  width: 100%;
+  max-width: 1000px;
+  height: min(86vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+}
+
+.editor-side {
+  border-right: 2px solid #101010;
+  min-height: 0;
+}
+
+.editor-stage {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #1b1b1b;
+}
+
+.editor-canvas {
+  display: block;
+  image-rendering: pixelated;
+  border: var(--px) solid #000;
+  box-shadow: 0 0 0 2px #4a4a4a;
+  touch-action: none;
+}
+
+.editor-swatches {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  padding: 0 10px;
+}
+
+.mc-swatch {
+  aspect-ratio: 1;
+  padding: 0;
+  border: var(--px) solid #1a1a1a;
+  cursor: pointer;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.mc-swatch:hover {
+  outline: var(--px) solid var(--mc-yellow);
+  outline-offset: 1px;
+}
+
+/* The native range control looks nothing like the rest; rebuild it as a slot
+   track with a widget-style handle. */
+.mc-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  margin: 6px 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* The track has to be styled separately or the browser draws its own over it. */
+.mc-range::-webkit-slider-runnable-track {
+  height: 16px;
+  background: #0b0b0b;
+  border: var(--px) solid #a0a0a0;
+}
+
+.mc-range::-moz-range-track {
+  height: 16px;
+  background: #0b0b0b;
+  border: var(--px) solid #a0a0a0;
+}
+
+.mc-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  /* Pull the handle up so it straddles the track rather than sitting on it. */
+  margin-top: -2px;
+  width: 12px;
+  height: 20px;
+  background: linear-gradient(#a6a6a6 0%, #8b8b8b 46%, #5f5f5f 100%);
+  border: var(--px) solid #000000;
+  box-shadow: inset var(--px) var(--px) 0 rgba(255, 255, 255, 0.28);
+}
+
+.mc-range::-moz-range-thumb {
+  width: 10px;
+  height: 20px;
+  border-radius: 0;
+  background: linear-gradient(#a6a6a6 0%, #8b8b8b 46%, #5f5f5f 100%);
+  border: var(--px) solid #000000;
+}
+
+.mc-color {
+  width: 56px;
+  height: 34px;
+  padding: 2px;
+  background: #0b0b0b;
+  border: var(--px) solid #a0a0a0;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ *
+ * App layout
+ * ------------------------------------------------------------------ */
+
+.app {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr) 460px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  gap: 8px;
+  padding: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.app > .topbar {
+  grid-column: 1 / -1;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1;
+}
+
+.section-title {
+  font-size: 16px;
+  line-height: var(--lh-body);
+  color: var(--mc-gray);
+  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
+  padding: 8px 10px 6px;
+  text-transform: uppercase;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+
+.empty-hint {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--mc-gray);
+  text-shadow: var(--px) var(--px) 0 var(--mc-gray-sh);
+  font-size: 16px;
+  line-height: var(--lh-body);
+}
+
+@media (max-width: 1440px) {
+  .app {
+    grid-template-columns: 290px minmax(0, 1fr) 380px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    height: auto;
+    min-height: 100%;
+  }
+  body {
+    overflow: auto;
+  }
+  .scroll {
+    max-height: 50vh;
+  }
+}

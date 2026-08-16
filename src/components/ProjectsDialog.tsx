@@ -1,0 +1,94 @@
+import { useRef } from 'react';
+import { useStore } from '../state/store';
+import { Modal } from './mc/Modal';
+import { MCButton } from './mc/MCPrimitives';
+
+export function ProjectsDialog({ onClose }: { onClose: () => void }) {
+  const {
+    savedProjects, loadProject, deleteProject, saveProject,
+    exportProjectFile, importProjectFile,
+    description, setDescription, picks, packOrder,
+  } = useStore();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <Modal title="Projects" onClose={onClose}>
+      <div className="mc-text-shadow" style={{ fontSize: 16, marginBottom: 4 }}>
+        PACK DESCRIPTION
+      </div>
+      <input
+        className="mc-input"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Shown under the pack name in Minecraft"
+        spellCheck={false}
+      />
+
+      <div
+        className="t-gray"
+        style={{ fontSize: 16, marginTop: 10, lineHeight: 'var(--lh-body)' }}
+      >
+        {Object.keys(picks).length} manual picks · {packOrder.length} packs in priority
+      </div>
+
+      <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: 'wrap' }}>
+        <MCButton onClick={() => void saveProject()}>Save current</MCButton>
+        <MCButton onClick={exportProjectFile} title="Download a .dreampack file you can share or reload">
+          Export .dreampack
+        </MCButton>
+        <MCButton onClick={() => fileRef.current?.click()}>Import .dreampack</MCButton>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".dreampack,.json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void importProjectFile(file).then(onClose);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      <div className="section-title" style={{ padding: '16px 0 6px' }}>
+        Saved in this browser
+      </div>
+
+      {savedProjects.length === 0 ? (
+        <div className="t-gray" style={{ fontSize: 16, lineHeight: 'var(--lh-body)' }}>
+          Nothing saved yet.
+        </div>
+      ) : (
+        savedProjects.map((p) => (
+          <div
+            key={p.id}
+            className="mc-panel"
+            style={{ padding: 10, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+          >
+            <div style={{ flex: 1, minWidth: 0, color: '#1c1c1c' }}>
+              <div style={{ fontSize: 16 }}>{p.name}</div>
+              <div style={{ fontSize: 16, color: '#4b4b4b' }}>
+                {p.targetVersion} · {Object.keys(p.picks).length} picks ·{' '}
+                {new Date(p.updatedAt).toLocaleString()}
+              </div>
+            </div>
+            <MCButton small onClick={() => void loadProject(p.id).then(onClose)}>
+              load
+            </MCButton>
+            <MCButton small variant="danger" onClick={() => void deleteProject(p.id)}>
+              ×
+            </MCButton>
+          </div>
+        ))
+      )}
+
+      <div
+        className="t-gray"
+        style={{ fontSize: 16, marginTop: 14, lineHeight: 'var(--lh-body)' }}
+      >
+        Imported packs stay in this browser between visits. A .dreampack file stores
+        your picks only - whoever opens it needs the same source packs imported.
+      </div>
+    </Modal>
+  );
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vite/
+*.local
+.DS_Store
+
+# Screenshot/verification artefacts from scripts/tour.mjs
+.shots/
+.shots-dev.log
