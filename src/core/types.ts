@@ -98,6 +98,34 @@ export interface Project {
   updatedAt: number;
 }
 
+/** Which slots the grid shows. Part of the session, so it survives a reload. */
+export interface Filters {
+  onlyDiffering: boolean;
+  onlyOverridden: boolean;
+  onlyUnmapped: boolean;
+}
+
+/**
+ * The working state, saved continuously and restored on boot.
+ *
+ * Imported packs already survive a reload in IndexedDB; without this the work
+ * done *with* them - the priority order, every pick, the target version - did
+ * not, which made the app look like it had remembered when it had not.
+ */
+export interface SessionSnapshot {
+  /** Bumped if the shape ever changes; an unknown version is ignored. */
+  v: 1;
+  packOrder: string[];
+  picks: Record<string, string>;
+  targetVersion: string;
+  projectName: string;
+  description: string;
+  iconFromPackId: string | null;
+  category: Category;
+  filters: Filters;
+  updatedAt: number;
+}
+
 export interface CanonicalResult {
   key: string;
   category: Category;

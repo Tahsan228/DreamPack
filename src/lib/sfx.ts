@@ -17,6 +17,57 @@ if (typeof localStorage !== 'undefined') {
   muted = localStorage.getItem(MUTE_KEY) === '1';
 }
 
+let keepAlive: AudioBufferSourceNode | null = null;
+
+/**
+ * Hold the audio path open.
+ *
+ * Left alone, an idle AudioContext is allowed to suspend and the operating
+ * system powers the output device down. The next click then has to wait for
+ * both to come back, which is heard as a lag of anything up to a couple of
+ * hundred milliseconds - but only on the first press after a pause, which is
+ * exactly when a button is most likely to be pressed.
+ *
+ * A looping source at -80 dB keeps the graph rendering and the device awake. It
+ * is inaudible, but it is not digital silence: a stream of zeroes is the thing a
+ * driver is entitled to treat as nothing happening.
+ */
+function startKeepAlive(ac: AudioContext): void {
+  // Nothing is going to play, so there is no latency worth holding a device
+  // open for.
+  if (keepAlive || muted) return;
+
+  const buffer = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate)), ac.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    // Alternating rather than constant, so it carries no DC offset.
+    data[i] = (i % 2 === 0 ? 1 : -1) * 1e-4;
+  }
+
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.connect(ac.destination);
+  try {
+    source.start();
+    keepAlive = source;
+  } catch {
+    // Some browsers refuse to start a source before the context is unlocked;
+    // the next user gesture comes back through here and tries again.
+  }
+}
+
+function stopKeepAlive(): void {
+  if (!keepAlive) return;
+  try {
+    keepAlive.stop();
+  } catch {
+    // Never started, because the context was still locked.
+  }
+  keepAlive.disconnect();
+  keepAlive = null;
+}
+
 function context(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!ctx) {
@@ -29,8 +80,31 @@ function context(): AudioContext | null {
       return null;
     }
   }
-  if (ctx.state === 'suspended') void ctx.resume();
+  if (ctx.state !== 'running') void ctx.resume();
+  startKeepAlive(ctx);
   return ctx;
+}
+
+/**
+ * Wake the audio path on the way *into* a click.
+ *
+ * `pointerdown` lands before `click`, so resuming here buys the context the few
+ * milliseconds it needs to be running by the time a button asks for its sound.
+ * Registered once, on the window, in the capture phase so nothing can stop it.
+ */
+function installWakeup(): void {
+  if (typeof window === 'undefined') return;
+  const wake = () => {
+    const ac = context();
+    if (ac && ac.state !== 'running') void ac.resume();
+  };
+  window.addEventListener('pointerdown', wake, { capture: true, passive: true });
+  window.addEventListener('keydown', wake, { capture: true, passive: true });
+  // A backgrounded tab has its context suspended whatever we do; catch it on
+  // the way back rather than on the first click after.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) wake();
+  });
 }
 
 export function isMuted(): boolean {
@@ -39,6 +113,8 @@ export function isMuted(): boolean {
 
 export function setMuted(value: boolean): void {
   muted = value;
+  if (value) stopKeepAlive();
+  else context();
   try {
     localStorage.setItem(MUTE_KEY, value ? '1' : '0');
   } catch {
@@ -155,6 +231,7 @@ function loadClick(ac: AudioContext): void {
 export function preloadSounds(): void {
   const ac = context();
   if (ac) loadClick(ac);
+  installWakeup();
 }
 
 /** The Minecraft button click. */

@@ -91,9 +91,10 @@ describe('App renders', () => {
       });
     });
 
-    // Both packs appear in the priority rail.
-    expect(view.getByText(/Pack A/)).toBeTruthy();
-    expect(view.getByText(/Pack B/)).toBeTruthy();
+    // Both packs appear in the priority rail. Scoped to the cards, because the
+    // bulk-apply buttons carry the same names.
+    expect(view.getByTitle(/^Pack A .*Drag to change priority/)).toBeTruthy();
+    expect(view.getByTitle(/^Pack B .*Drag to change priority/)).toBeTruthy();
 
     // "only differing" is on by default, so only the sword shows: the two packs
     // ship different bytes for it, and only pack A has the apple.
@@ -108,6 +109,40 @@ describe('App renders', () => {
     // Clearing the pick falls back to the priority order.
     act(() => useStore.getState().clearPick('texture:item/diamond_sword'));
     expect(useStore.getState().picks['texture:item/diamond_sword']).toBeUndefined();
+  });
+
+  /**
+   * App installs a drop-anywhere handler on window, and React delegates from
+   * the root container below it - so a drop on the rail used to be seen twice
+   * and imported the same zip twice.
+   */
+  it('imports a zip dropped on the rail exactly once', async () => {
+    const view = await mount();
+
+    const calls: File[][] = [];
+    act(() => {
+      useStore.setState({
+        importFiles: async (files: File[]) => {
+          calls.push(files);
+        },
+      });
+    });
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'MyPack.zip', { type: 'application/zip' });
+    const target = view.getByText(/Drop/i).closest('.scroll');
+    expect(target).toBeTruthy();
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: { files: [file], types: ['Files'] },
+    });
+
+    await act(async () => {
+      target!.dispatchEvent(drop);
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0].name).toBe('MyPack.zip');
   });
 
   it('reorders pack priority', async () => {

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
-import { resolveSlot } from '../core/resolve';
+import { orderCandidates, resolveSlot } from '../core/resolve';
 import type { AssetSlot, Candidate, ImportedPack } from '../core/types';
 import { MCButton, MCPanel, TexturePreview } from './mc/MCPrimitives';
 import { Viewport3D } from './Viewport3D';
+import { canPreview3D, shapeForKey } from '../core/blockShapes';
 import { useAnimation, useImageSize, useTexture } from '../lib/useTexture';
 
 const PREVIEW = 176;
@@ -19,6 +21,9 @@ function SoundButton({ packId, path }: { packId: string; path: string }) {
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
+      // Without this the button keeps reading "stop" after the sound behind it
+      // has been torn down, and the next click only resets it.
+      setPlaying(false);
     };
   }, [url]);
 
@@ -49,6 +54,7 @@ function CandidateChip({
   slot,
   candidate,
   pack,
+  index,
   isWinner,
   isPicked,
   onPick,
@@ -56,6 +62,8 @@ function CandidateChip({
   slot: AssetSlot;
   candidate: Candidate;
   pack: ImportedPack;
+  /** Position in the strip; 1-9 are also the keyboard shortcuts for it. */
+  index: number;
   isWinner: boolean;
   isPicked: boolean;
   onPick: () => void;
@@ -82,8 +90,16 @@ function CandidateChip({
             ? '0 0 0 2px var(--mc-green)'
             : 'none',
       }}
-      title={`${pack.name}\n${candidate.primaryPath}\n${candidate.width ?? '?'}×${candidate.height ?? '?'} · ${candidate.size} B${isPicked ? '\n\nPicked' : isWinner ? '\n\nWinning by priority' : ''}`}
+      title={`${pack.name}\n${candidate.primaryPath}\n${candidate.width ?? '?'}×${candidate.height ?? '?'} · ${candidate.size} B${index <= 9 ? `\n\nPress ${index} to pick this` : ''}${isPicked ? '\n\nPicked' : isWinner ? '\n\nWinning by priority' : ''}`}
     >
+      {index <= 9 && (
+        <span
+          aria-hidden="true"
+          style={{ position: 'absolute', left: 3, top: 1, fontSize: 16, color: '#4b4b4b' }}
+        >
+          {index}
+        </span>
+      )}
       <div style={{ width: CHIP - 8, height: CHIP - 8, display: 'grid', placeItems: 'center' }}>
         {isImage && url ? (
           <img src={url} alt={pack.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
@@ -112,7 +128,13 @@ function CandidateChip({
 }
 
 export function Viewport() {
-  const { slots, packs, packOrder, picks, selectedKey, pick, clearPick, openEditor } = useStore();
+  const { slots, packs, packOrder, picks, selectedKey, pick, clearPick, openEditor } = useStore(
+    useShallow((s) => ({
+      slots: s.slots, packs: s.packs, packOrder: s.packOrder, picks: s.picks,
+      selectedKey: s.selectedKey, pick: s.pick, clearPick: s.clearPick,
+      openEditor: s.openEditor,
+    })),
+  );
   const [mode, setMode] = useState<'2d' | '3d'>('2d');
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState(0);
@@ -165,13 +187,12 @@ export function Viewport() {
 
   const packById = useMemo(() => new Map(packs.map((p) => [p.id, p])), [packs]);
 
-  const orderedCandidates = useMemo(() => {
-    if (!slot) return [];
-    const rank = new Map(packOrder.map((id, i) => [id, i]));
-    return [...slot.candidates].sort(
-      (a, b) => (rank.get(a.packId) ?? 99) - (rank.get(b.packId) ?? 99),
-    );
-  }, [slot, packOrder]);
+  // Shared with the grid's number keys, so "press 2" always means the second
+  // chip in this strip.
+  const orderedCandidates = useMemo(
+    () => (slot ? orderCandidates(slot, packOrder) : []),
+    [slot, packOrder],
+  );
 
   if (!slot) {
     return (
@@ -187,8 +208,9 @@ export function Viewport() {
   }
 
   const pickedPackId = picks[slot.key];
-  const canUse3D = isImage && (slot.category === 'Blocks' || slot.category === 'Items');
+  const canUse3D = canPreview3D(slot.key, slot.category);
   const effectiveMode = canUse3D ? mode : '2d';
+  const shape = shapeForKey(slot.key, slot.category);
 
   return (
     <MCPanel className="col" style={{ padding: 0 }}>
@@ -209,11 +231,7 @@ export function Viewport() {
         <div className="row" style={{ justifyContent: 'center' }}>
           <div className="mc-inset" style={{ padding: 6, display: 'inline-block' }}>
             {effectiveMode === '3d' ? (
-              <Viewport3D
-                url={url}
-                mode={slot.category === 'Blocks' ? 'block' : 'item'}
-                size={PREVIEW}
-              />
+              <Viewport3D url={url} shape={shape} size={PREVIEW} />
             ) : (
               <TexturePreview
                 src={isImage ? url : null}
@@ -258,9 +276,14 @@ export function Viewport() {
             </>
           )}
           {slot.category === 'Sounds' && winner && (
-            <SoundButton packId={winner.packId} path={winner.primaryPath} />
+            <SoundButton
+              key={`${winner.packId}:${winner.primaryPath}`}
+              packId={winner.packId}
+              path={winner.primaryPath}
+            />
           )}
         </div>
+
 
         {isImage && winner && (
           <div className="row" style={{ justifyContent: 'center', marginTop: 6 }}>
@@ -299,7 +322,7 @@ export function Viewport() {
           From which pack ({orderedCandidates.length})
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {orderedCandidates.map((candidate) => {
+          {orderedCandidates.map((candidate, i) => {
             const pack = packById.get(candidate.packId);
             if (!pack) return null;
             return (
@@ -308,6 +331,7 @@ export function Viewport() {
                 slot={slot}
                 candidate={candidate}
                 pack={pack}
+                index={i + 1}
                 isWinner={winner?.packId === candidate.packId}
                 isPicked={pickedPackId === candidate.packId}
                 onPick={() =>

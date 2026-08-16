@@ -1,6 +1,9 @@
-import { useRef, useState } from 'react';
+import { useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
+import { resolveAll } from '../core/resolve';
 import { MCButton, MCPanel, MCProgress } from './mc/MCPrimitives';
+import { ConfirmDialog } from './mc/ConfirmDialog';
 import { AdSlot } from './AdSlot';
 import type { ImportedPack } from '../core/types';
 
@@ -8,6 +11,9 @@ function PackCard({
   pack,
   index,
   total,
+  supplies,
+  share,
+  onRemove,
   onDragStart,
   onDragOver,
   onDrop,
@@ -16,12 +22,22 @@ function PackCard({
   pack: ImportedPack;
   index: number;
   total: number;
+  /** How many exported assets this pack currently wins. */
+  supplies: number;
+  share: number;
+  onRemove: () => void;
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
   dragging: boolean;
 }) {
-  const { movePack, removePack, iconFromPackId, setIconPack } = useStore();
+  const { movePack, iconFromPackId, setIconPack } = useStore(
+    useShallow((s) => ({
+      movePack: s.movePack,
+      iconFromPackId: s.iconFromPackId,
+      setIconPack: s.setIconPack,
+    })),
+  );
   const isIcon = iconFromPackId === pack.id;
 
   return (
@@ -70,7 +86,20 @@ function PackCard({
           {pack.packFormat !== null ? ` · fmt ${pack.packFormat}` : ''} · {pack.fileCount} files
         </div>
 
-        <div className="row" style={{ marginTop: 8, gap: 8 }}>
+        {/* What this pack actually contributes to the export, which the
+            priority number alone never tells you. Kept to one text line plus a
+            hairline: the rail is short, and a third card has to still fit. */}
+        <div
+          style={{ fontSize: 16, color: '#1c1c1c' }}
+          title={`${supplies} of the assets in the exported pack come from ${pack.name}`}
+        >
+          supplies {supplies} <span style={{ color: '#4b4b4b' }}>{Math.round(share * 100)}%</span>
+        </div>
+        <div style={{ height: 3, background: '#00000033' }} aria-hidden="true">
+          <div style={{ width: `${share * 100}%`, height: '100%', background: pack.color }} />
+        </div>
+
+        <div className="row" style={{ marginTop: 6, gap: 8 }}>
           <MCButton small onClick={() => movePack(pack.id, -1)} disabled={index === 0} title="Higher priority">
             ↑
           </MCButton>
@@ -93,7 +122,7 @@ function PackCard({
           <MCButton
             small
             variant="danger"
-            onClick={() => void removePack(pack.id)}
+            onClick={onRemove}
             title="Remove pack"
             style={{ marginLeft: 'auto' }}
           >
@@ -106,17 +135,52 @@ function PackCard({
 }
 
 export function PackRail() {
-  const { packs, packOrder, imports, importFiles, reorderPack } = useStore();
+  const { packs, packOrder, imports, importFiles, reorderPack, removePack, slots, picks } =
+    useStore(
+      useShallow((s) => ({
+        packs: s.packs, packOrder: s.packOrder, imports: s.imports,
+        importFiles: s.importFiles, reorderPack: s.reorderPack, removePack: s.removePack,
+        slots: s.slots, picks: s.picks,
+      })),
+    );
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [hovering, setHovering] = useState(false);
+  const [removing, setRemoving] = useState<ImportedPack | null>(null);
 
   const ordered = packOrder
     .map((id) => packs.find((p) => p.id === id))
     .filter((p): p is ImportedPack => Boolean(p));
 
+  /*
+   * Who actually wins what, using the exporter's own resolver so the numbers
+   * cannot disagree with the zip. Picks are deferred: a bulk apply rewrites
+   * hundreds of them at once, and this is the expensive part of that frame.
+   */
+  const deferredPicks = useDeferredValue(picks);
+  const contribution = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const winner of resolveAll(slots, packOrder, deferredPicks).values()) {
+      counts.set(winner.packId, (counts.get(winner.packId) ?? 0) + 1);
+    }
+    return counts;
+  }, [slots, packOrder, deferredPicks]);
+
+  const totalSupplied = useMemo(
+    () => [...contribution.values()].reduce((n, c) => n + c, 0),
+    [contribution],
+  );
+
+  /** Picks that would be discarded along with a pack, so the prompt can say so. */
+  const picksFrom = (packId: string) =>
+    Object.values(picks).filter((id) => id === packId).length;
+
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    // App installs a drop-anywhere handler on window. React delegates to the
+    // root container, which sits below it, so without this the same zip would
+    // be imported twice: once here and once on the way up.
+    e.stopPropagation();
     setHovering(false);
     const files = [...e.dataTransfer.files];
     if (files.length > 0) void importFiles(files);
@@ -155,6 +219,9 @@ export function PackRail() {
             pack={pack}
             index={i}
             total={ordered.length}
+            supplies={contribution.get(pack.id) ?? 0}
+            share={totalSupplied === 0 ? 0 : (contribution.get(pack.id) ?? 0) / totalSupplied}
+            onRemove={() => setRemoving(pack)}
             dragging={dragIndex === i}
             onDragStart={() => setDragIndex(i)}
             onDragOver={(e) => {
@@ -211,6 +278,31 @@ export function PackRail() {
       {/* The rail runs full height whatever is in it, so the space under the
           import button is already spare. */}
       <AdSlot id="rail" variant="inset" />
+
+      {removing && (
+        <ConfirmDialog
+          title="Remove pack"
+          confirmLabel="Remove"
+          danger
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => {
+            void removePack(removing.id);
+            setRemoving(null);
+          }}
+        >
+          Remove {removing.name}? Its files leave your browser, and this cannot be undone.
+          {picksFrom(removing.id) > 0 && (
+            <>
+              <br />
+              <br />
+              <span className="t-gold">
+                {picksFrom(removing.id)} pick
+                {picksFrom(removing.id) === 1 ? '' : 's'} point at it and will be dropped.
+              </span>
+            </>
+          )}
+        </ConfirmDialog>
+      )}
     </MCPanel>
   );
 }

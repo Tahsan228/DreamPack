@@ -1,7 +1,9 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { Modal } from './mc/Modal';
+import { ConfirmDialog } from './mc/ConfirmDialog';
 import { MCButton } from './mc/MCPrimitives';
+import type { Project } from '../core/types';
 
 export function ProjectsDialog({ onClose }: { onClose: () => void }) {
   const {
@@ -10,6 +12,25 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
     description, setDescription, picks, packOrder,
   } = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [deleting, setDeleting] = useState<Project | null>(null);
+
+  if (deleting) {
+    return (
+      <ConfirmDialog
+        title="Delete project"
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          void deleteProject(deleting.id);
+          setDeleting(null);
+        }}
+      >
+        Delete &quot;{deleting.name}&quot;? Its {Object.keys(deleting.picks).length} saved picks
+        go with it. The packs themselves are not touched.
+      </ConfirmDialog>
+    );
+  }
 
   return (
     <Modal title="Projects" onClose={onClose}>
@@ -75,7 +96,7 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
             <MCButton small onClick={() => void loadProject(p.id).then(onClose)}>
               load
             </MCButton>
-            <MCButton small variant="danger" onClick={() => void deleteProject(p.id)}>
+            <MCButton small variant="danger" onClick={() => setDeleting(p)} title="Delete project">
               ×
             </MCButton>
           </div>

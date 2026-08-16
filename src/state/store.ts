@@ -1,12 +1,13 @@
 import { create } from 'zustand';
-import type { AssetSlot, Category, ImportedPack, Project } from '../core/types';
-import { buildSlotIndex, type IndexedFile } from '../core/resolve';
+import type { AssetSlot, Category, Filters, ImportedPack, Project } from '../core/types';
+import { buildSlotIndex, resolveSlot, type IndexedFile } from '../core/resolve';
 import { DEFAULT_VERSION } from '../core/versions';
 import { createEditsPack, editStoragePath, EDITS_PACK_ID } from '../core/editsPack';
 import { hashBytes } from '../core/hash';
 import * as db from '../db/idb';
 import { dropPack, dropFile } from '../lib/textureCache';
 import { playSuccess } from '../lib/sfx';
+import { loadSession, reconcile, saveSession, type SessionState } from './session';
 import type { ImportRequest, ImportResponse } from '../workers/importWorker';
 import type { ExportRequest, ExportResponse } from '../workers/exportWorker';
 
@@ -33,10 +34,25 @@ export interface ExportStatus {
   fileCount?: number;
 }
 
-interface Filters {
-  onlyDiffering: boolean;
-  onlyOverridden: boolean;
-  onlyUnmapped: boolean;
+/**
+ * One point on the undo stack.
+ *
+ * Only the choices are captured, never the packs themselves: importing or
+ * removing a pack moves bytes in IndexedDB and cannot be undone, so those
+ * actions clear the stack instead of pushing to it.
+ */
+interface HistoryEntry {
+  picks: Record<string, string>;
+  packOrder: string[];
+}
+
+const MAX_HISTORY = 50;
+
+/** A zip whose name matches a pack that is already imported. */
+export interface PendingDuplicate {
+  file: File;
+  name: string;
+  existingPackId: string;
 }
 
 interface State {
@@ -62,9 +78,18 @@ interface State {
   imports: ImportStatus[];
   exportStatus: ExportStatus | null;
   savedProjects: Project[];
+  /** Zips held back because a pack of the same name is already imported. */
+  pendingDuplicates: PendingDuplicate[];
+
+  past: HistoryEntry[];
+  future: HistoryEntry[];
 
   hydrate: () => Promise<void>;
   importFiles: (files: File[]) => Promise<void>;
+  /** Import without the duplicate check; `nameOverride` renames the incoming pack. */
+  runImports: (files: File[], nameOverride?: string) => Promise<void>;
+  /** Import regardless of a name clash, optionally replacing the pack it clashes with. */
+  resolveDuplicate: (name: string, action: 'replace' | 'keep' | 'skip') => Promise<void>;
   removePack: (packId: string) => Promise<void>;
   movePack: (packId: string, delta: number) => void;
   reorderPack: (fromIndex: number, toIndex: number) => void;
@@ -72,6 +97,11 @@ interface State {
   pick: (key: string, packId: string) => void;
   clearPick: (key: string) => void;
   clearAllPicks: () => void;
+  /** Point every given slot that this pack supplies at it; returns how many moved. */
+  pickMany: (packId: string, keys: string[]) => number;
+  clearMany: (keys: string[]) => void;
+  undo: () => void;
+  redo: () => void;
 
   setVersion: (v: string) => void;
   setCategory: (c: Category) => void;
@@ -99,6 +129,18 @@ const rebuild = (packs: ImportedPack[], indexes: Record<string, IndexedFile[]>):
   buildSlotIndex(
     packs.map((p) => ({ id: p.id, era: p.era, files: indexes[p.id] ?? [] })),
   );
+
+/**
+ * Push the current choices onto the undo stack.
+ *
+ * Spread into the `set` of any action that changes picks or priority, so one
+ * misclick out of several hundred is recoverable without clearing everything.
+ * Redo is dropped, as it always is once a new branch is taken.
+ */
+const remember = (s: State): Pick<State, 'past' | 'future'> => ({
+  past: [...s.past, { picks: s.picks, packOrder: s.packOrder }].slice(-MAX_HISTORY),
+  future: [],
+});
 
 function download(bytes: Uint8Array | string, filename: string, mime: string) {
   const blob = typeof bytes === 'string'
@@ -136,6 +178,10 @@ export const useStore = create<State>((set, get) => ({
   imports: [],
   exportStatus: null,
   savedProjects: [],
+  pendingDuplicates: [],
+
+  past: [],
+  future: [],
 
   async hydrate() {
     const packs = await db.listPacks();
@@ -143,13 +189,33 @@ export const useStore = create<State>((set, get) => ({
     for (const p of packs) indexes[p.id] = await db.getFileIndex(p.id);
 
     const ordered = [...packs].sort((a, b) => a.importedAt - b.importedAt);
+    const saved = await loadSession();
+
+    // Restore the choices made last visit, fitted to the packs that are still
+    // here. Without this the packs come back but the work done with them - the
+    // priority order and every pick - silently reset to defaults.
+    const restored = saved
+      ? reconcile(saved.packOrder, saved.picks, ordered.map((p) => p.id))
+      : { packOrder: ordered.map((p) => p.id), picks: {} };
+
     set({
       ready: true,
       packs: ordered,
       indexes,
       slots: rebuild(ordered, indexes),
-      packOrder: ordered.map((p) => p.id),
+      packOrder: restored.packOrder,
+      picks: restored.picks,
       savedProjects: await db.listProjects(),
+      ...(saved
+        ? {
+            targetVersion: saved.targetVersion,
+            projectName: saved.projectName,
+            description: saved.description,
+            iconFromPackId: saved.iconFromPackId,
+            category: saved.category,
+            filters: saved.filters,
+          }
+        : {}),
     });
   },
 
@@ -157,9 +223,55 @@ export const useStore = create<State>((set, get) => ({
     const zips = files.filter((f) => f.name.toLowerCase().endsWith('.zip'));
     if (zips.length === 0) return;
 
+    // Importing the same zip twice leaves two identically named packs, which
+    // also makes .dreampack's name matching ambiguous. Hold those back and let
+    // the user say what they meant.
+    const existingByName = new Map(get().packs.map((p) => [p.name.toLowerCase(), p.id]));
+    const duplicates: PendingDuplicate[] = [];
+    const fresh: File[] = [];
+    for (const file of zips) {
+      const name = file.name.replace(/\.zip$/i, '');
+      const existingPackId = existingByName.get(name.toLowerCase());
+      if (existingPackId) duplicates.push({ file, name, existingPackId });
+      else fresh.push(file);
+    }
+
+    if (duplicates.length > 0) {
+      set((s) => ({ pendingDuplicates: [...s.pendingDuplicates, ...duplicates] }));
+    }
+    if (fresh.length === 0) return;
+
+    await get().runImports(fresh);
+  },
+
+  async resolveDuplicate(name, action) {
+    const entry = get().pendingDuplicates.find((d) => d.name === name);
+    set((s) => ({ pendingDuplicates: s.pendingDuplicates.filter((d) => d.name !== name) }));
+    if (!entry || action === 'skip') return;
+
+    if (action === 'replace') {
+      await get().removePack(entry.existingPackId);
+      await get().runImports([entry.file]);
+      return;
+    }
+
+    // Keep both: give the newcomer a free name so the two stay tellable apart.
+    const taken = new Set(get().packs.map((p) => p.name.toLowerCase()));
+    let suffix = 2;
+    while (taken.has(`${entry.name} (${suffix})`.toLowerCase())) suffix++;
+    await get().runImports([entry.file], `${entry.name} (${suffix})`);
+  },
+
+  async runImports(files, nameOverride) {
+    const zips = files.filter((f) => f.name.toLowerCase().endsWith('.zip'));
+    if (zips.length === 0) return;
+
+    // The pack set is about to change, and history entries name packs by id.
+    set({ past: [], future: [] });
+
     await Promise.all(zips.map((file, i) => new Promise<void>((resolve) => {
       const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const name = file.name.replace(/\.zip$/i, '');
+      const name = nameOverride ?? file.name.replace(/\.zip$/i, '');
       const color = PACK_COLORS[(get().packs.length + i) % PACK_COLORS.length];
 
       set((s) => ({ imports: [...s.imports, { id, name, phase: 'Reading', ratio: 0 }] }));
@@ -231,41 +343,109 @@ export const useStore = create<State>((set, get) => ({
         slots: rebuild(packs, indexes),
         packOrder: s.packOrder.filter((id) => id !== packId),
         iconFromPackId: s.iconFromPackId === packId ? null : s.iconFromPackId,
+        // The bytes have left IndexedDB, so no history entry naming this pack
+        // could be restored. Drop the stack rather than leave it lying.
+        past: [],
+        future: [],
       };
     });
   },
 
   movePack(packId, delta) {
-    const order = [...get().packOrder];
+    const s = get();
+    const order = [...s.packOrder];
     const i = order.indexOf(packId);
     const j = i + delta;
     if (i === -1 || j < 0 || j >= order.length) return;
     [order[i], order[j]] = [order[j], order[i]];
-    set({ packOrder: order });
+    set({ ...remember(s), packOrder: order });
   },
 
   reorderPack(fromIndex, toIndex) {
-    const order = [...get().packOrder];
+    const s = get();
+    const order = [...s.packOrder];
     if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= order.length) return;
     const [moved] = order.splice(fromIndex, 1);
     order.splice(Math.max(0, Math.min(order.length, toIndex)), 0, moved);
-    set({ packOrder: order });
+    set({ ...remember(s), packOrder: order });
   },
 
   pick(key, packId) {
-    set((s) => ({ picks: { ...s.picks, [key]: packId } }));
+    set((s) => ({ ...remember(s), picks: { ...s.picks, [key]: packId } }));
   },
 
   clearPick(key) {
     set((s) => {
       const picks = { ...s.picks };
       delete picks[key];
-      return { picks };
+      return { ...remember(s), picks };
     });
   },
 
   clearAllPicks() {
-    set({ picks: {} });
+    set((s) => ({ ...remember(s), picks: {} }));
+  },
+
+  /**
+   * Apply one pack across a set of slots - the filtered view, in practice.
+   *
+   * Only slots that pack actually supplies are touched; the rest keep whatever
+   * they had, so "use Pack B for everything shown" cannot quietly blank the
+   * assets Pack B does not contain.
+   */
+  pickMany(packId, keys) {
+    const s = get();
+    const byKey = new Map(s.slots.map((slot) => [slot.key, slot]));
+    const picks = { ...s.picks };
+    let applied = 0;
+
+    for (const key of keys) {
+      const slot = byKey.get(key);
+      if (!slot?.candidates.some((c) => c.packId === packId)) continue;
+      if (picks[key] === packId) continue;
+      picks[key] = packId;
+      applied++;
+    }
+
+    if (applied > 0) set({ ...remember(s), picks });
+    return applied;
+  },
+
+  clearMany(keys) {
+    const s = get();
+    const picks = { ...s.picks };
+    let removed = 0;
+    for (const key of keys) {
+      if (key in picks) {
+        delete picks[key];
+        removed++;
+      }
+    }
+    if (removed > 0) set({ ...remember(s), picks });
+  },
+
+  undo() {
+    const s = get();
+    const previous = s.past[s.past.length - 1];
+    if (!previous) return;
+    set({
+      past: s.past.slice(0, -1),
+      future: [...s.future, { picks: s.picks, packOrder: s.packOrder }].slice(-MAX_HISTORY),
+      picks: previous.picks,
+      packOrder: previous.packOrder,
+    });
+  },
+
+  redo() {
+    const s = get();
+    const next = s.future[s.future.length - 1];
+    if (!next) return;
+    set({
+      future: s.future.slice(0, -1),
+      past: [...s.past, { picks: s.picks, packOrder: s.packOrder }].slice(-MAX_HISTORY),
+      picks: next.picks,
+      packOrder: next.packOrder,
+    });
   },
 
   setVersion: (v) => set({ targetVersion: v }),
@@ -289,9 +469,31 @@ export const useStore = create<State>((set, get) => ({
     const pack = state.packs.find((p) => p.id === EDITS_PACK_ID) ?? createEditsPack();
     const entry: IndexedFile = { path, size: bytes.length, hash: hashBytes(bytes), width, height };
 
-    const index = await db.putPackFile(pack, { path, bytes }, entry);
+    let index = await db.putPackFile(pack, { path, bytes }, entry);
     // The cached object URL points at the pre-edit bytes.
     dropFile(EDITS_PACK_ID, path);
+
+    /*
+     * An animated texture is a filmstrip plus a .png.mcmeta saying how to play
+     * it. The edit only replaces the strip, so the companion has to come along
+     * or the export ships a filmstrip with no animation block and the game
+     * squashes every frame onto one face.
+     */
+    const slot = state.slots.find((s) => s.key === key);
+    const source = slot ? resolveSlot(slot, state.packOrder, state.picks) : null;
+    const sourceMcmeta = source?.companions.find((c) => c.endsWith('.mcmeta'));
+    if (source && sourceMcmeta && source.packId !== EDITS_PACK_ID) {
+      const metaBytes = await db.getFileBytes(source.packId, sourceMcmeta);
+      if (metaBytes) {
+        const metaPath = `${path}.mcmeta`;
+        index = await db.putPackFile(
+          pack,
+          { path: metaPath, bytes: metaBytes },
+          { path: metaPath, size: metaBytes.length, hash: hashBytes(metaBytes) },
+        );
+        dropFile(EDITS_PACK_ID, metaPath);
+      }
+    }
 
     set((s) => {
       const packs = s.packs.some((p) => p.id === EDITS_PACK_ID)
@@ -386,19 +588,25 @@ export const useStore = create<State>((set, get) => ({
   async loadProject(id) {
     const project = (await db.listProjects()).find((p) => p.id === id);
     if (!project) return;
-    const known = new Set(get().packs.map((p) => p.id));
+
+    // Drop references to packs that are no longer imported, keep any new ones
+    // at the end - the same reconciliation the session restore does.
+    const fitted = reconcile(
+      project.packOrder,
+      project.picks,
+      get().packs.map((p) => p.id),
+    );
+
     set({
       projectName: project.name,
       targetVersion: project.targetVersion,
-      // Drop references to packs that are no longer imported, keep any new ones at the end.
-      packOrder: [
-        ...project.packOrder.filter((p) => known.has(p)),
-        ...[...known].filter((p) => !project.packOrder.includes(p)),
-      ],
-      picks: project.picks,
+      packOrder: fitted.packOrder,
+      picks: fitted.picks,
       description: project.packMeta.description,
       iconFromPackId: project.packMeta.iconFromPackId,
       selectedKey: null,
+      past: [],
+      future: [],
     });
   },
 
@@ -414,6 +622,7 @@ export const useStore = create<State>((set, get) => ({
       name: s.projectName,
       targetVersion: s.targetVersion,
       description: s.description,
+      iconFromPackId: s.iconFromPackId,
       // Names travel with ids so a shared project can explain which packs it needs.
       packs: s.packOrder.map((id) => ({ id, name: s.packs.find((p) => p.id === id)?.name ?? id })),
       picks: s.picks,
@@ -427,6 +636,7 @@ export const useStore = create<State>((set, get) => ({
       name?: string;
       targetVersion?: string;
       description?: string;
+      iconFromPackId?: string | null;
       packs?: Array<{ id: string; name: string }>;
       picks?: Record<string, string>;
     };
@@ -458,9 +668,52 @@ export const useStore = create<State>((set, get) => ({
       projectName: data.name ?? s.projectName,
       targetVersion: data.targetVersion ?? s.targetVersion,
       description: data.description ?? s.description,
+      // The icon is a pack id like any other, so it goes through the same remap.
+      iconFromPackId: data.iconFromPackId
+        ? remap.get(data.iconFromPackId) ?? null
+        : s.iconFromPackId,
       picks,
       packOrder: [...order, ...s.packOrder.filter((id) => !order.includes(id))],
       selectedKey: null,
+      past: [],
+      future: [],
     }));
   },
 }));
+
+/*
+ * Keep the session on disk.
+ *
+ * One subscription rather than a write at the end of every action: picks,
+ * priority, version and filters all change from a dozen places, and any one of
+ * them forgotten would be a silent data loss of exactly the kind this fixes.
+ * Writes are debounced in `session.ts`, and nothing is written before `hydrate`
+ * has restored, or it would overwrite the saved session with the defaults.
+ */
+let lastSaved: SessionState | null = null;
+
+useStore.subscribe((state) => {
+  if (!state.ready) return;
+
+  const next: SessionState = {
+    packOrder: state.packOrder,
+    picks: state.picks,
+    targetVersion: state.targetVersion,
+    projectName: state.projectName,
+    description: state.description,
+    iconFromPackId: state.iconFromPackId,
+    category: state.category,
+    filters: state.filters,
+  };
+
+  // Most state changes touch none of this - scrolling, selection, import
+  // progress - so compare by reference before queueing a write.
+  if (lastSaved && (Object.keys(next) as Array<keyof SessionState>).every(
+    (k) => next[k] === lastSaved![k],
+  )) {
+    return;
+  }
+
+  lastSaved = next;
+  saveSession(next);
+});

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
 import { VERSIONS } from '../core/versions';
 import { Logo, MCButton, MCPanel } from './mc/MCPrimitives';
@@ -26,7 +27,13 @@ export function TopBar({ onOpenProjects }: { onOpenProjects: () => void }) {
   const {
     targetVersion, setVersion, projectName, setProjectName,
     packs, exportPack, saveProject,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      targetVersion: s.targetVersion, setVersion: s.setVersion,
+      projectName: s.projectName, setProjectName: s.setProjectName,
+      packs: s.packs, exportPack: s.exportPack, saveProject: s.saveProject,
+    })),
+  );
   const savedRef = useRef<HTMLSpanElement>(null);
   const [muted, setMutedState] = useState(isMuted);
   const [splash] = useState(() => SPLASHES[Math.floor(Math.random() * SPLASHES.length)]);

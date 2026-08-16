@@ -21,10 +21,40 @@ npm run dev      # http://localhost:5173
    from *every* pack side by side; click one to choose it. Picked slots get a corner marker.
 4. **Export** — produces a `.zip` you drop into `.minecraft/resourcepacks`.
 
+Your work is saved as you go. Packs, priority order, picks, target version and
+filters all come back exactly as you left them on the next visit — **Save** and
+**Export .dreampack** are for keeping *named* versions and sharing them, not for
+avoiding data loss.
+
 The **"only differing"** filter is on by default and is the one that makes this
 usable: most of a pack is identical to every other pack, so it hides everything
 the packs agree on and leaves you with the couple hundred assets actually worth
 choosing between.
+
+## Working quickly
+
+Picking a pack apart one slot at a time is a lot of clicking, so three things
+cut it down.
+
+**Bulk picks.** Under the filters is a button per pack: *use for all N*. It
+applies to exactly what the grid is showing, so the category, search box and
+filters are how you aim it — search `wool`, hit a pack, and every wool in that
+tab comes from it. Slots that pack has no texture for are left alone rather than
+pointed at a file that does not exist, and the line underneath tells you how
+many actually moved.
+
+**The keyboard.** Arrow keys walk the grid, `1`-`9` pick the numbered pack from
+the candidate strip, `0` resets a slot to the priority order, `Enter` opens the
+texture editor, `/` jumps to the search box and `Esc` deselects.
+
+**Undo.** `Ctrl+Z` and `Ctrl+Shift+Z` step through picks and priority changes,
+including bulk ones — a bulk apply is a single step, not four hundred. Importing
+or removing a pack clears the history, because the files behind it are gone from
+the browser and no earlier state could be restored honestly.
+
+The pack rail shows what each pack **supplies**: how many of the assets in the
+exported zip actually come from it, counted with the exporter's own resolver.
+It is the quick answer to whether the priority order did what you meant.
 
 ## Versions
 
@@ -53,6 +83,14 @@ picker with an alpha slider, three palettes — a general pixel-art set, your re
 colours, and the colours already in the texture you're editing — plus undo/redo
 (`Ctrl+Z` / `Ctrl+Shift+Z`), zoom, and a pixel grid.
 
+**Size** resamples the texture to 16, 32, 64, 128 or 256 wide. A texture is not
+stuck at whatever resolution its source pack shipped — this is how you take a 16x
+pack up to 32x and start adding detail. Resampling is nearest-neighbour, so
+upscaling gives you clean blocks of solid colour to paint into rather than a
+blurred mess, and the aspect ratio is held: an animated texture is a filmstrip of
+N square frames, and changing its proportions would silently change how many
+frames the game thinks it has.
+
 **import image** draws a PNG or JPG onto the texture. By default it is scaled to
 the texture's existing dimensions, keeping its proportions and letterboxing the
 remainder, because a resource pack expects a given size - and for animated
@@ -61,6 +99,10 @@ imported image's dimensions instead, which is how you move a 16x texture up to
 32x or higher. Either way it is drawn with nearest-neighbour sampling, so pixel
 art stays pixel art, and it lands on the undo stack like any other edit.
 
+If the texture is animated, its `.png.mcmeta` is copied into the edit alongside
+the filmstrip — without it the export would ship a strip the game cannot play,
+and would squash every frame onto one face.
+
 **Save & Exit** writes the result into a synthetic pack called **My Edits** and
 pins that slot to it. That's the whole mechanism: an edit is just another
 candidate, so it shows up in the pack rail, competes in the grid, and exports
@@ -68,6 +110,31 @@ through the same path as everything else. Edits are stored under modern canonica
 names, so they get renamed correctly for whatever version you target.
 
 Deleting the **My Edits** pack from the rail discards every edit.
+
+## The 3D preview
+
+Select a block or item texture and hit **3D**. Drag to rotate, double-click to
+stop the spin.
+
+**Items are extruded, not hung flat.** Minecraft gives a held item real
+thickness, so a water bucket seen from the side is a slab of metal rather than a
+sheet of paper. The preview does the same: the sprite's alpha channel is cut into
+a solid one sixteenth of a block thick, with a wall wherever the art meets
+transparency — including around holes in the middle of a sprite. Front and back
+faces are emitted per horizontal run of opaque pixels rather than per pixel, and
+walls only exist on the perimeter, so the cost tracks the shape rather than the
+resolution and a 256x texture is no more expensive than a 16x one.
+
+**Blocks get the right solid.** Wrapping every block texture around a full cube
+is wrong for a good number of them — a bed is nine sixteenths tall, a sapling is
+two crossed sheets, a door is a thin panel. `src/core/blockShapes.ts` works this
+out from the canonical name, so it behaves the same for a 1.8.9 pack's
+`bed_feet_side` and a modern pack's `red_bed`, and covers beds, slabs, trapdoors
+and carpets, plants, torches, doors, ladders and panes.
+
+It is chosen automatically and there is nothing to configure — a preview that
+needs setting up is not a preview. Adding a shape is one entry in `SHAPES` and
+one pattern in `BLOCK_RULES`.
 
 ## Sound
 
@@ -84,6 +151,16 @@ lag between pressing a button and the sound arriving. Rather than re-encoding th
 file, `sfx.ts` measures the lead-in once at decode time and starts playback past
 it, so the click lands with the press. Drop in a different sample and it is
 measured again automatically.
+
+There is a second source of lag that has nothing to do with the file. Leave the
+page alone for a while and the browser lets the idle `AudioContext` suspend while
+the operating system powers the output device down; the next click then waits for
+both to come back, so the *first* press after a pause arrives late and every one
+after it is fine. `sfx.ts` holds the path open with a looping source at **-80 dB**
+— inaudible, but deliberately not digital silence, because a stream of zeroes is
+exactly what a driver is entitled to treat as nothing happening. It is stopped
+while sound is muted, and `pointerdown` resumes the context a moment before the
+`click` that needs it.
 
 Toggle sound with the note button in the header; the setting persists.
 
@@ -193,14 +270,17 @@ Picking an asset also brings whatever it needs to work:
 
 ## Projects
 
-**Save** stores your picks in the browser. **Export .dreampack** writes them to a
-file you can share or reload — it stores picks only, so whoever opens it needs the
-same source packs imported. Re-imported packs are matched back up by name.
+The current session is always saved on its own. **Save** additionally stores a
+*named* snapshot you can come back to. **Export .dreampack** writes one to a file
+you can share or reload — it stores picks only, so whoever opens it needs the
+same source packs imported. Re-imported packs are matched back up by name, which
+is why importing a zip whose name is already taken stops to ask whether you meant
+to replace it, keep both, or skip.
 
 ## Development
 
 ```bash
-npm test              # 81 tests, mostly on the rename/resolve logic
+npm test              # 126 tests, mostly on the rename/resolve logic
 npm run build         # typecheck + production build to dist/
 npm run audit:glyphs  # fail if any rendered character is missing from the font
 ```
@@ -223,8 +303,21 @@ candidate strip all have something real to show. It is deterministic, so the
 exported zip can be diffed against the sources to prove that a manual pick beat
 the priority order and everything else followed it.
 
+It then checks behaviour rather than just taking pictures, and exits non-zero if
+any of it breaks: that a number key picks, that a bulk apply moves many slots and
+one `Ctrl+Z` puts them all back, that **picks and priority order survive a page
+reload**, that re-importing a pack of the same name is caught, and that an edited
+*animated* texture still carries its `.png.mcmeta` into the exported zip. Console
+errors from the third-party ad script are reported but do not fail the run.
+
 `npm run shot -- name --dpr=1.25` grabs a single screenshot at a chosen device
 pixel ratio, which is how to reproduce a display with Windows scaling on.
+
+`npm run shot:3d` photographs the 3D preview on its own — two extruded items, a
+cube, a bed, a plant, a torch and an animated block, each showing the shape the
+detector picked with no input. Geometry is the one thing that cannot be checked
+by reading the code, and the spin is stopped at a fixed angle first so the shots
+are comparable between runs.
 
 `dist/` is a static site — host it anywhere, no server needed.
 
@@ -236,6 +329,9 @@ Layout:
 | `src/data/flattening.ts` | the 1.13 rename table, tested as a bijection |
 | `src/core/resolve.ts` | slot union across packs; picks + priority → one winner |
 | `src/core/editsPack.ts` | the synthetic "My Edits" pack the editor writes into |
+| `src/state/session.ts` | the autosaved session, and fitting it back to the packs that exist |
+| `src/core/blockShapes.ts` | which solid a texture belongs on in the 3D preview |
+| `src/lib/spriteGeometry.ts` | extruding an item sprite into a mesh from its alpha channel |
 | `src/workers/` | zip import and export, off the main thread |
 | `src/components/mc/` | Minecraft GUI primitives |
 | `src/lib/sfx.ts` | click sample plus synthesised UI sounds |

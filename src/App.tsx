@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from './state/store';
 import { DirtBackground } from './components/mc/MCPrimitives';
 import { installTextures } from './lib/textures';
@@ -13,13 +14,23 @@ import { LoadingScreen, type BootState } from './components/LoadingScreen';
 import { CornerLinks } from './components/CornerLinks';
 import { DonatePage } from './components/DonatePage';
 import { AdSlot } from './components/AdSlot';
+import { DuplicateImportDialog } from './components/DuplicateImportDialog';
 import { preloadSounds } from './lib/sfx';
+import { flushSession } from './state/session';
 
 /** Floor on each boot step, so the bar and its phase label are legible. */
 const MIN_STEP_MS = 220;
 
 export function App() {
-  const { hydrate, ready, importFiles, editingKey, closeEditor } = useStore();
+  const { hydrate, ready, importFiles, editingKey, closeEditor } = useStore(
+    useShallow((s) => ({
+      hydrate: s.hydrate,
+      ready: s.ready,
+      importFiles: s.importFiles,
+      editingKey: s.editingKey,
+      closeEditor: s.closeEditor,
+    })),
+  );
   const [showProjects, setShowProjects] = useState(false);
   const [showDonate, setShowDonate] = useState(false);
   const [boot, setBoot] = useState<BootState>({
@@ -83,6 +94,14 @@ export function App() {
     };
   }, [importFiles]);
 
+  // Session writes are debounced, so a tab closed mid-burst would lose the last
+  // few picks. Push whatever is queued out on the way down.
+  useEffect(() => {
+    const onLeave = () => void flushSession();
+    window.addEventListener('pagehide', onLeave);
+    return () => window.removeEventListener('pagehide', onLeave);
+  }, []);
+
   return (
     <>
       <DirtBackground />
@@ -104,6 +123,7 @@ export function App() {
         <AdSlot id="footer" className="app-footer-ad" />
       </div>
       <ExportDialog />
+      <DuplicateImportDialog />
       {showProjects && <ProjectsDialog onClose={() => setShowProjects(false)} />}
       {editingKey && <TextureEditor slotKey={editingKey} onClose={closeEditor} />}
       {showDonate && <DonatePage onClose={() => setShowDonate(false)} />}
