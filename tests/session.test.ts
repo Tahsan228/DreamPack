@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useStore } from '../src/state/store';
-import { flushSession, reconcile, saveSession } from '../src/state/session';
+import { flushSession, reconcile, remapPacks, restorePicks, saveSession } from '../src/state/session';
 import { readSession, storePack } from '../src/db/idb';
 import type { ImportedPack } from '../src/core/types';
 
@@ -49,6 +49,122 @@ describe('reconcile', () => {
 
   it('does not duplicate a pack listed twice in the saved order', () => {
     expect(reconcile(['a', 'a'], {}, ['a']).packOrder).toEqual(['a']);
+  });
+});
+
+describe('remapPacks', () => {
+  const current = [
+    { id: 'fresh-a', name: 'Pack A' },
+    { id: 'fresh-b', name: 'Pack B' },
+  ];
+
+  it('keeps an id that is still imported', () => {
+    const { remap, missing } = remapPacks([{ id: 'fresh-a', name: 'Pack A' }], current);
+    expect(remap.get('fresh-a')).toBe('fresh-a');
+    expect(missing).toEqual([]);
+  });
+
+  /**
+   * The case that made saved projects unloadable: importing a pack again gives
+   * it a new id, so the id in the project matches nothing.
+   */
+  it('falls back to the pack name when the id has gone stale', () => {
+    const { remap, missing } = remapPacks([{ id: 'old-id', name: 'Pack B' }], current);
+    expect(remap.get('old-id')).toBe('fresh-b');
+    expect(missing).toEqual([]);
+  });
+
+  it('matches a name regardless of case', () => {
+    const { remap } = remapPacks([{ id: 'old', name: 'PACK a' }], current);
+    expect(remap.get('old')).toBe('fresh-a');
+  });
+
+  it('reports a pack that is not here under either id or name', () => {
+    const { remap, missing } = remapPacks([{ id: 'old', name: 'Pack Z' }], current);
+    expect(remap.has('old')).toBe(false);
+    expect(missing).toEqual(['Pack Z']);
+  });
+
+  it('cannot match a project saved without names', () => {
+    const { missing } = remapPacks([{ id: 'old-id' }], current);
+    expect(missing).toEqual(['old-id']);
+  });
+
+  it('never lets two saved packs claim the same one', () => {
+    const { remap, missing } = remapPacks(
+      [{ id: 'x', name: 'Pack A' }, { id: 'y', name: 'Pack A' }],
+      current,
+    );
+    expect(remap.get('x')).toBe('fresh-a');
+    expect(remap.has('y')).toBe(false);
+    expect(missing).toEqual(['Pack A']);
+  });
+
+  it('lets a live id win over a name that would take the same pack', () => {
+    // 'fresh-a' is still imported, so it must not be handed to the stale ref.
+    const { remap } = remapPacks(
+      [{ id: 'stale', name: 'Pack A' }, { id: 'fresh-a', name: 'Pack A' }],
+      current,
+    );
+    expect(remap.get('fresh-a')).toBe('fresh-a');
+    expect(remap.has('stale')).toBe(false);
+  });
+});
+
+describe('restorePicks', () => {
+  const current = [
+    { id: 'fresh-a', name: 'Pack A' },
+    { id: 'fresh-b', name: 'Pack B' },
+  ];
+
+  it('rewrites picks onto the packs that are here now', () => {
+    const out = restorePicks(
+      [{ id: 'old-a', name: 'Pack A' }, { id: 'old-b', name: 'Pack B' }],
+      ['old-b', 'old-a'],
+      { 'texture:item/apple': 'old-a', 'texture:item/bow': 'old-b' },
+      current,
+    );
+
+    expect(out.picks).toEqual({
+      'texture:item/apple': 'fresh-a',
+      'texture:item/bow': 'fresh-b',
+    });
+    expect(out.packOrder).toEqual(['fresh-b', 'fresh-a']);
+    expect(out.restored).toBe(2);
+    expect(out.dropped).toBe(0);
+  });
+
+  it('counts the picks it had to throw away', () => {
+    const out = restorePicks(
+      [{ id: 'old-a', name: 'Pack A' }, { id: 'gone', name: 'Pack Z' }],
+      ['old-a', 'gone'],
+      { one: 'old-a', two: 'gone', three: 'gone' },
+      current,
+    );
+
+    expect(out.picks).toEqual({ one: 'fresh-a' });
+    expect(out.dropped).toBe(2);
+    expect(out.missing).toEqual(['Pack Z']);
+  });
+
+  it('puts packs imported since the save at the back of the order', () => {
+    const out = restorePicks(
+      [{ id: 'old-a', name: 'Pack A' }],
+      ['old-a'],
+      {},
+      current,
+    );
+    expect(out.packOrder).toEqual(['fresh-a', 'fresh-b']);
+  });
+
+  it('does not list the same pack twice', () => {
+    const out = restorePicks(
+      [{ id: 'old-a', name: 'Pack A' }],
+      ['old-a', 'old-a'],
+      {},
+      current,
+    );
+    expect(out.packOrder).toEqual(['fresh-a', 'fresh-b']);
   });
 });
 

@@ -13,6 +13,20 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
   } = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState<Project | null>(null);
+  /** Why a load did not do what was expected. Success closes instead. */
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /**
+   * Close on a clean load; stay open and explain when packs are missing.
+   *
+   * Applying whatever matched and closing regardless is what made a failed load
+   * indistinguishable from a successful one.
+   */
+  const handleLoad = async (run: Promise<{ ok: boolean; message: string }>) => {
+    const result = await run;
+    if (result.ok) onClose();
+    else setProblem(result.message);
+  };
 
   if (deleting) {
     return (
@@ -65,11 +79,29 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
           style={{ display: 'none' }}
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) void importProjectFile(file).then(onClose);
+            if (file) void handleLoad(importProjectFile(file));
             e.target.value = '';
           }}
         />
       </div>
+
+      {problem && (
+        <div
+          className="mc-inset"
+          style={{ padding: 8, marginTop: 10, background: '#1a1206' }}
+        >
+          <div className="t-gold" style={{ fontSize: 16, lineHeight: 'var(--lh-body)' }}>
+            {problem}
+          </div>
+          <div
+            className="t-gray"
+            style={{ fontSize: 16, marginTop: 6, lineHeight: 'var(--lh-body)' }}
+          >
+            Whatever could be matched has been applied. Import the missing packs and
+            load again to get the rest.
+          </div>
+        </div>
+      )}
 
       <div className="section-title" style={{ padding: '16px 0 6px' }}>
         Saved in this browser
@@ -93,7 +125,7 @@ export function ProjectsDialog({ onClose }: { onClose: () => void }) {
                 {new Date(p.updatedAt).toLocaleString()}
               </div>
             </div>
-            <MCButton small onClick={() => void loadProject(p.id).then(onClose)}>
+            <MCButton small onClick={() => void handleLoad(loadProject(p.id))}>
               load
             </MCButton>
             <MCButton small variant="danger" onClick={() => setDeleting(p)} title="Delete project">

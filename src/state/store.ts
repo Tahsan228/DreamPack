@@ -7,7 +7,10 @@ import { hashBytes } from '../core/hash';
 import * as db from '../db/idb';
 import { dropPack, dropFile } from '../lib/textureCache';
 import { playSuccess } from '../lib/sfx';
-import { loadSession, reconcile, saveSession, type SessionState } from './session';
+import {
+  loadSession, reconcile, restorePicks, saveSession,
+  type RestoredPicks, type SessionState,
+} from './session';
 import type { ImportRequest, ImportResponse } from '../workers/importWorker';
 import type { ExportRequest, ExportResponse } from '../workers/exportWorker';
 
@@ -119,10 +122,10 @@ interface State {
   dismissExport: () => void;
 
   saveProject: () => Promise<void>;
-  loadProject: (id: string) => Promise<void>;
+  loadProject: (id: string) => Promise<LoadResult>;
   deleteProject: (id: string) => Promise<void>;
   exportProjectFile: () => void;
-  importProjectFile: (file: File) => Promise<void>;
+  importProjectFile: (file: File) => Promise<LoadResult>;
 }
 
 const rebuild = (packs: ImportedPack[], indexes: Record<string, IndexedFile[]>): AssetSlot[] =>
@@ -155,6 +158,43 @@ function download(bytes: Uint8Array | string, filename: string, mime: string) {
 }
 
 const slug = (s: string) => s.trim().replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'dreampack';
+
+/**
+ * What loading a project or a .dreampack actually achieved.
+ *
+ * Both used to apply what they could and say nothing, so a load that matched no
+ * packs at all - the normal outcome once a pack has been re-imported - looked
+ * exactly like a load that worked.
+ */
+export interface LoadResult {
+  ok: boolean;
+  message: string;
+}
+
+function summarise(result: RestoredPicks, legacyNoNames: boolean): LoadResult {
+  if (result.missing.length === 0) {
+    return {
+      ok: true,
+      message: result.restored > 0 ? `Restored ${result.restored} picks.` : 'Loaded.',
+    };
+  }
+
+  const names = result.missing.slice(0, 3).join(', ');
+  const more = result.missing.length > 3 ? ` and ${result.missing.length - 3} more` : '';
+  const lost = result.dropped > 0
+    ? ` ${result.dropped} pick${result.dropped === 1 ? '' : 's'} could not be restored.`
+    : '';
+  // A project saved before names were recorded cannot be matched by anything
+  // but its ids, so say so rather than blaming the packs.
+  const why = legacyNoNames
+    ? ' It was saved before pack names were recorded, so it can only be matched to the exact packs it was saved with - re-save it to fix that.'
+    : '';
+
+  return {
+    ok: false,
+    message: `Could not find ${result.missing.length} pack${result.missing.length === 1 ? '' : 's'}: ${names}${more}.${lost}${why}`,
+  };
+}
 
 export const useStore = create<State>((set, get) => ({
   ready: false,
@@ -572,12 +612,18 @@ export const useStore = create<State>((set, get) => ({
 
   async saveProject() {
     const s = get();
+    // Names travel with the ids: an id only survives as long as that exact
+    // import does, so without them the project cannot be matched back up.
+    const packNames: Record<string, string> = {};
+    for (const p of s.packs) packNames[p.id] = p.name;
+
     const project: Project = {
       id: slug(s.projectName),
       name: s.projectName,
       targetVersion: s.targetVersion,
       packOrder: s.packOrder,
       picks: s.picks,
+      packNames,
       packMeta: { description: s.description, iconFromPackId: s.iconFromPackId },
       updatedAt: Date.now(),
     };
@@ -587,27 +633,39 @@ export const useStore = create<State>((set, get) => ({
 
   async loadProject(id) {
     const project = (await db.listProjects()).find((p) => p.id === id);
-    if (!project) return;
+    if (!project) return { ok: false, message: 'That project is no longer saved.' };
 
-    // Drop references to packs that are no longer imported, keep any new ones
-    // at the end - the same reconciliation the session restore does.
-    const fitted = reconcile(
+    const s = get();
+    // Every pack the project mentions, whether or not it was in the priority
+    // order, so a pick can still be matched up by name.
+    const refs = new Set([...project.packOrder, ...Object.values(project.picks)]);
+    const saved = [...refs].map((packId) => ({
+      id: packId,
+      name: project.packNames?.[packId],
+    }));
+
+    const result = restorePicks(
+      saved,
       project.packOrder,
       project.picks,
-      get().packs.map((p) => p.id),
+      s.packs.map((p) => ({ id: p.id, name: p.name })),
     );
 
     set({
       projectName: project.name,
       targetVersion: project.targetVersion,
-      packOrder: fitted.packOrder,
-      picks: fitted.picks,
+      packOrder: result.packOrder,
+      picks: result.picks,
       description: project.packMeta.description,
-      iconFromPackId: project.packMeta.iconFromPackId,
+      iconFromPackId: project.packMeta.iconFromPackId
+        ? result.remap.get(project.packMeta.iconFromPackId) ?? null
+        : null,
       selectedKey: null,
       past: [],
       future: [],
     });
+
+    return summarise(result, project.packNames === undefined);
   },
 
   async deleteProject(id) {
@@ -631,53 +689,52 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async importProjectFile(file) {
-    const text = await file.text();
-    const data = JSON.parse(text) as {
+    interface DreamPackFile {
+      dreampack?: number;
       name?: string;
       targetVersion?: string;
       description?: string;
       iconFromPackId?: string | null;
       packs?: Array<{ id: string; name: string }>;
       picks?: Record<string, string>;
-    };
-
-    const byName = new Map(get().packs.map((p) => [p.name, p.id]));
-    const known = new Set(get().packs.map((p) => p.id));
-
-    // Re-importing a pack gives it a fresh id, so fall back to matching on name.
-    const remap = new Map<string, string>();
-    for (const p of data.packs ?? []) {
-      if (known.has(p.id)) remap.set(p.id, p.id);
-      else {
-        const match = byName.get(p.name);
-        if (match) remap.set(p.id, match);
-      }
     }
 
-    const picks: Record<string, string> = {};
-    for (const [key, packId] of Object.entries(data.picks ?? {})) {
-      const mapped = remap.get(packId);
-      if (mapped) picks[key] = mapped;
+    let data: DreamPackFile;
+    try {
+      data = JSON.parse(await file.text()) as DreamPackFile;
+    } catch {
+      // Silence here read as "the button does nothing".
+      return { ok: false, message: `${file.name} is not readable as a .dreampack file.` };
     }
 
-    const order = (data.packs ?? [])
-      .map((p) => remap.get(p.id))
-      .filter((id): id is string => Boolean(id));
+    if (!data || typeof data !== 'object' || !data.picks || !Array.isArray(data.packs)) {
+      return { ok: false, message: `${file.name} does not look like a .dreampack file.` };
+    }
 
-    set((s) => ({
+    const s = get();
+    const result = restorePicks(
+      data.packs,
+      data.packs.map((p) => p.id),
+      data.picks,
+      s.packs.map((p) => ({ id: p.id, name: p.name })),
+    );
+
+    set({
       projectName: data.name ?? s.projectName,
       targetVersion: data.targetVersion ?? s.targetVersion,
       description: data.description ?? s.description,
       // The icon is a pack id like any other, so it goes through the same remap.
       iconFromPackId: data.iconFromPackId
-        ? remap.get(data.iconFromPackId) ?? null
+        ? result.remap.get(data.iconFromPackId) ?? null
         : s.iconFromPackId,
-      picks,
-      packOrder: [...order, ...s.packOrder.filter((id) => !order.includes(id))],
+      picks: result.picks,
+      packOrder: result.packOrder,
       selectedKey: null,
       past: [],
       future: [],
-    }));
+    });
+
+    return summarise(result, false);
   },
 }));
 

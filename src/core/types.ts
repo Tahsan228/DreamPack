@@ -91,6 +91,14 @@ export interface Project {
   packOrder: string[];
   /** Explicit per-slot overrides: canonical key -> packId. */
   picks: Record<string, string>;
+  /**
+   * packId -> pack name at the time of saving.
+   *
+   * Ids are regenerated on every import, so without names a project became
+   * unloadable the moment one of its packs was re-imported. Optional because
+   * projects saved before this was recorded do not have it.
+   */
+  packNames?: Record<string, string>;
   packMeta: {
     description: string;
     iconFromPackId: string | null;

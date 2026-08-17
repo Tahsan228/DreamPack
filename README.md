@@ -273,14 +273,24 @@ Picking an asset also brings whatever it needs to work:
 The current session is always saved on its own. **Save** additionally stores a
 *named* snapshot you can come back to. **Export .dreampack** writes one to a file
 you can share or reload — it stores picks only, so whoever opens it needs the
-same source packs imported. Re-imported packs are matched back up by name, which
-is why importing a zip whose name is already taken stops to ask whether you meant
-to replace it, keep both, or skip.
+same source packs imported.
+
+Both record **pack names alongside ids**. A pack is given a fresh random id every
+time it is imported, so an id only holds as long as that exact import does — clear
+the browser, re-import a pack, move to another machine or open someone else's
+project and every id in it is stale. The name is the durable handle, so it is the
+fallback, and it is why importing a zip whose name is already taken stops to ask
+whether you meant to replace it, keep both, or skip.
+
+When a load cannot find a pack it says so and stays open, naming what is missing
+and how many picks it could not place, rather than applying nothing and closing
+as though it had worked. Projects saved before names were recorded still load by
+id, and say that re-saving them will fix the matching.
 
 ## Development
 
 ```bash
-npm test              # 126 tests, mostly on the rename/resolve logic
+npm test              # 146 tests, mostly on the rename/resolve logic
 npm run build         # typecheck + production build to dist/
 npm run audit:glyphs  # fail if any rendered character is missing from the font
 ```
