@@ -13,6 +13,7 @@
     "audit:glyphs": "node scripts/audit-glyphs.mjs",
     "testpacks": "node scripts/make-test-packs.mjs",
     "shot": "node scripts/shot.mjs",
+    "shot:3d": "node scripts/shot3d.mjs",
     "tour": "node scripts/tour.mjs"
   },
   "dependencies": {

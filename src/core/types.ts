@@ -91,10 +91,46 @@ export interface Project {
   packOrder: string[];
   /** Explicit per-slot overrides: canonical key -> packId. */
   picks: Record<string, string>;
+  /**
+   * packId -> pack name at the time of saving.
+   *
+   * Ids are regenerated on every import, so without names a project became
+   * unloadable the moment one of its packs was re-imported. Optional because
+   * projects saved before this was recorded do not have it.
+   */
+  packNames?: Record<string, string>;
   packMeta: {
     description: string;
     iconFromPackId: string | null;
   };
+  updatedAt: number;
+}
+
+/** Which slots the grid shows. Part of the session, so it survives a reload. */
+export interface Filters {
+  onlyDiffering: boolean;
+  onlyOverridden: boolean;
+  onlyUnmapped: boolean;
+}
+
+/**
+ * The working state, saved continuously and restored on boot.
+ *
+ * Imported packs already survive a reload in IndexedDB; without this the work
+ * done *with* them - the priority order, every pick, the target version - did
+ * not, which made the app look like it had remembered when it had not.
+ */
+export interface SessionSnapshot {
+  /** Bumped if the shape ever changes; an unknown version is ignored. */
+  v: 1;
+  packOrder: string[];
+  picks: Record<string, string>;
+  targetVersion: string;
+  projectName: string;
+  description: string;
+  iconFromPackId: string | null;
+  category: Category;
+  filters: Filters;
   updatedAt: number;
 }
 

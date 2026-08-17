@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { ImportedPack, Project } from '../core/types';
+import type { ImportedPack, Project, SessionSnapshot } from '../core/types';
 import type { IndexedFile } from '../core/resolve';
 
 interface FileRecord {
@@ -19,22 +19,45 @@ interface DreamPackDB extends DBSchema {
   files: { key: [string, string]; value: FileRecord };
   fileIndex: { key: string; value: FileIndexRecord };
   projects: { key: string; value: Project };
+  /** A single record under SESSION_KEY: the working state, restored on boot. */
+  session: { key: string; value: SessionSnapshot };
 }
+
+const SESSION_KEY = 'current';
 
 let dbPromise: Promise<IDBPDatabase<DreamPackDB>> | null = null;
 
 export function getDb(): Promise<IDBPDatabase<DreamPackDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<DreamPackDB>('dreampack', 1, {
-      upgrade(db) {
-        db.createObjectStore('packs', { keyPath: 'id' });
-        db.createObjectStore('files', { keyPath: ['packId', 'path'] });
-        db.createObjectStore('fileIndex', { keyPath: 'packId' });
-        db.createObjectStore('projects', { keyPath: 'id' });
+    // Every step is guarded by oldVersion: an existing browser arrives here at
+    // version 1 with the first four stores already present, and must only get
+    // the ones added since.
+    dbPromise = openDB<DreamPackDB>('dreampack', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore('packs', { keyPath: 'id' });
+          db.createObjectStore('files', { keyPath: ['packId', 'path'] });
+          db.createObjectStore('fileIndex', { keyPath: 'packId' });
+          db.createObjectStore('projects', { keyPath: 'id' });
+        }
+        if (oldVersion < 2) {
+          // Out-of-line key: one record, written under SESSION_KEY.
+          db.createObjectStore('session');
+        }
       },
     });
   }
   return dbPromise;
+}
+
+export async function readSession(): Promise<SessionSnapshot | null> {
+  const db = await getDb();
+  return (await db.get('session', SESSION_KEY)) ?? null;
+}
+
+export async function writeSession(snapshot: SessionSnapshot): Promise<void> {
+  const db = await getDb();
+  await db.put('session', snapshot, SESSION_KEY);
 }
 
 export async function listPacks(): Promise<ImportedPack[]> {

@@ -14,6 +14,13 @@ interface RGBA {
   a: number;
 }
 
+/** One point on the editor's undo stack, dimensions included. */
+interface Snapshot {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
 /** A generic pixel-art starting palette - the 16 Minecraft dye hues plus greys. */
 const PALETTE = [
   '#ffffff', '#d9d9d9', '#9c9c9c', '#666666', '#3f3f3f', '#1e1e1e', '#000000', '#ffb1b1',
@@ -22,6 +29,14 @@ const PALETTE = [
 ];
 
 const MAX_UNDO = 60;
+
+/**
+ * Widths offered by the resize control.
+ *
+ * Resource pack textures are powers of two - the game samples them as a grid -
+ * and 16 is vanilla, so these are the sizes anyone actually targets.
+ */
+const SIZES = [16, 32, 64, 128, 256];
 
 const hexToRgba = (hex: string, alpha: number): RGBA => ({
   r: parseInt(hex.slice(1, 3), 16),
@@ -48,8 +63,11 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** Working pixels at the texture's natural size. */
   const pixelsRef = useRef<ImageData | null>(null);
-  const undoRef = useRef<Uint8ClampedArray[]>([]);
-  const redoRef = useRef<Uint8ClampedArray[]>([]);
+  // Snapshots carry their dimensions: resizing and importing at a different
+  // resolution both change them, and restoring pixels into a buffer of another
+  // size would either throw or quietly shear the image.
+  const undoRef = useRef<Snapshot[]>([]);
+  const redoRef = useRef<Snapshot[]>([]);
   const paintingRef = useRef(false);
   const importRef = useRef<HTMLInputElement>(null);
   const lastPixelRef = useRef<string>('');
@@ -156,10 +174,20 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     repaint();
   }, [repaint, dims, historyTick]);
 
+  const snapshot = (pixels: ImageData): Snapshot => ({
+    data: new Uint8ClampedArray(pixels.data),
+    width: pixels.width,
+    height: pixels.height,
+  });
+
   const pushUndo = useCallback(() => {
     const pixels = pixelsRef.current;
     if (!pixels) return;
-    undoRef.current.push(new Uint8ClampedArray(pixels.data));
+    undoRef.current.push({
+      data: new Uint8ClampedArray(pixels.data),
+      width: pixels.width,
+      height: pixels.height,
+    });
     if (undoRef.current.length > MAX_UNDO) undoRef.current.shift();
     redoRef.current = [];
     syncHistory();
@@ -252,28 +280,38 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     repaint();
   };
 
+  /** Put a snapshot back, growing or shrinking the buffer if it was resized. */
+  const restore = (target: Snapshot) => {
+    const pixels = pixelsRef.current;
+    if (pixels && pixels.width === target.width && pixels.height === target.height) {
+      pixels.data.set(target.data);
+    } else {
+      const next = new ImageData(target.width, target.height);
+      next.data.set(target.data);
+      pixelsRef.current = next;
+      setDims({ width: target.width, height: target.height });
+    }
+    setDirty(true);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+    syncHistory();
+    playClick();
+  };
+
   const undo = () => {
     const pixels = pixelsRef.current;
     const previous = undoRef.current.pop();
     if (!pixels || !previous) return;
-    redoRef.current.push(new Uint8ClampedArray(pixels.data));
-    pixels.data.set(previous);
-    setDirty(true);
-    setHistoryTick((t) => t + 1);
-    syncHistory();
-    playClick();
+    redoRef.current.push(snapshot(pixels));
+    restore(previous);
   };
 
   const redo = () => {
     const pixels = pixelsRef.current;
     const next = redoRef.current.pop();
     if (!pixels || !next) return;
-    undoRef.current.push(new Uint8ClampedArray(pixels.data));
-    pixels.data.set(next);
-    setDirty(true);
-    setHistoryTick((t) => t + 1);
-    syncHistory();
-    playClick();
+    undoRef.current.push(snapshot(pixels));
+    restore(next);
   };
 
   /**
@@ -332,6 +370,54 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
 
     image.onerror = () => URL.revokeObjectURL(url);
     image.src = url;
+  };
+
+  /**
+   * Resample the texture to a new resolution.
+   *
+   * This is how you take a 16x pack up to 32x or higher: the art is redrawn at
+   * the new size with nearest-neighbour sampling, so upscaling gives you clean
+   * blocks of solid colour to paint detail into rather than a blurred mess.
+   *
+   * The aspect ratio is held, which matters more than it looks: an animated
+   * texture is a filmstrip of N square frames, and changing its proportions
+   * would silently change how many frames the game thinks it has.
+   */
+  const resizeTo = (targetWidth: number) => {
+    const current = pixelsRef.current;
+    if (!current || current.width === targetWidth) return;
+
+    const targetHeight = Math.max(
+      1,
+      Math.round(current.height * (targetWidth / current.width)),
+    );
+
+    const source = document.createElement('canvas');
+    source.width = current.width;
+    source.height = current.height;
+    const sourceCtx = source.getContext('2d');
+    if (!sourceCtx) return;
+    sourceCtx.putImageData(current, 0, 0);
+
+    const scaled = document.createElement('canvas');
+    scaled.width = targetWidth;
+    scaled.height = targetHeight;
+    const ctx = scaled.getContext('2d');
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    pushUndo();
+    pixelsRef.current = ctx.getImageData(0, 0, targetWidth, targetHeight);
+    setDims({ width: targetWidth, height: targetHeight });
+    setDirty(true);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+
+    // Refit the zoom, or a jump to 256 leaves the canvas overflowing its pane.
+    const fit = Math.floor(420 / Math.max(targetWidth, targetHeight));
+    setZoom(Math.max(1, Math.min(24, fit || 1)));
+    playPop();
   };
 
   const handleSave = async () => {
@@ -456,6 +542,40 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
                   {label}
                 </MCButton>
               ))}
+            </div>
+
+            {/* Resolution is not fixed to whatever the source pack shipped:
+                this is how a 16x texture is taken up to 32x or higher. */}
+            <div className="section-title">Size</div>
+            <div style={{ padding: '0 10px' }}>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {SIZES.map((size) => (
+                  <MCButton
+                    key={size}
+                    small
+                    onClick={() => resizeTo(size)}
+                    disabled={!dims}
+                    title={
+                      dims && dims.height !== dims.width
+                        ? `Resample to ${size} wide, keeping the filmstrip's proportions`
+                        : `Resample this texture to ${size}x${size}`
+                    }
+                    style={dims?.width === size ? { background: '#3a7d3a', color: '#fff' } : undefined}
+                  >
+                    {size}
+                  </MCButton>
+                ))}
+              </div>
+              <div
+                className="t-gray"
+                style={{ fontSize: 16, marginTop: 6, lineHeight: 'var(--lh-body)' }}
+              >
+                {dims
+                  ? dims.height === dims.width
+                    ? `now ${dims.width}x${dims.height}`
+                    : `now ${dims.width}x${dims.height} · ${Math.max(1, Math.floor(dims.height / dims.width))} frames`
+                  : 'loading'}
+              </div>
             </div>
 
             <div className="section-title">Image</div>

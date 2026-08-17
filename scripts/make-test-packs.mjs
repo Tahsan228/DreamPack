@@ -161,8 +161,23 @@ function buildPack({ name, palette, description }) {
     t('assets/minecraft/textures/blocks/obsidian.png', 16, 16, blockFace('#2a1b3d')),
     t('assets/minecraft/textures/gui/icons.png', 256, 256, guiSheet(palette.accent)),
     t('assets/minecraft/textures/gui/widgets.png', 256, 256, guiSheet(palette.metal)),
+    // A four-frame filmstrip, so the animated path has something real to run
+    // on: editing one of these must carry its .png.mcmeta into the export.
+    t('assets/minecraft/textures/blocks/lava_still.png', 16, 64, (x, y) =>
+      shade(palette.gold, 0.6 + 0.5 * Math.abs(Math.sin((x + y) * 0.4)))),
+    // Blocks that are not cubes, so the 3D preview's shape detection has
+    // something to be right or wrong about.
+    t('assets/minecraft/textures/blocks/bed_feet_top.png', 16, 16, blockFace(palette.accent)),
+    t('assets/minecraft/textures/blocks/sapling_oak.png', 16, 16, (x, y) =>
+      (x > 3 && x < 12 && y > 2 && y < 14 ? shade(palette.emerald, 0.9) : CLEAR)),
+    t('assets/minecraft/textures/blocks/torch_on.png', 16, 16, (x, y) =>
+      (x > 6 && x < 10 && y > 5 ? shade(palette.gold, 1) : CLEAR)),
     t('pack.png', 64, 64, blockFace(palette.tool)),
   ]);
+
+  files['assets/minecraft/textures/blocks/lava_still.png.mcmeta'] = new TextEncoder().encode(
+    JSON.stringify({ animation: { frametime: 2 } }, null, 2),
+  );
 
   files['pack.mcmeta'] = new TextEncoder().encode(
     JSON.stringify({ pack: { pack_format: 1, description } }, null, 2),

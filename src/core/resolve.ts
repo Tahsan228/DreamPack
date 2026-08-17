@@ -96,6 +96,20 @@ export function resolveSlot(
   return slot.candidates[0] ?? null;
 }
 
+/**
+ * A slot's candidates in priority order.
+ *
+ * This is the order the candidate strip renders in, and therefore the order the
+ * number keys pick from - the two must not drift apart.
+ */
+export function orderCandidates(slot: AssetSlot, packOrder: string[]): Candidate[] {
+  const rank = new Map(packOrder.map((id, i) => [id, i]));
+  return [...slot.candidates].sort(
+    (a, b) => (rank.get(a.packId) ?? Number.MAX_SAFE_INTEGER)
+      - (rank.get(b.packId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** True when a pick was made and it is not what the priority order would have chosen. */
 export function isOverridden(
   slot: AssetSlot,

@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
-import { getText, getUrl, peekUrl } from './textureCache';
+import { getText, getUrl, peekUrl, release, retain } from './textureCache';
 
-/** Object URL for a file inside a pack, resolved from the cache when already loaded. */
+/**
+ * Object URL for a file inside a pack, resolved from the cache when already
+ * loaded.
+ *
+ * The URL is retained for as long as this hook is mounted on it, so the cache's
+ * LRU eviction cannot revoke a texture that is still on screen.
+ */
 export function useTexture(packId: string | null, path: string | null): string | null {
   const [url, setUrl] = useState<string | null>(() =>
     packId && path ? peekUrl(packId, path) : null,
@@ -12,10 +18,13 @@ export function useTexture(packId: string | null, path: string | null): string |
       setUrl(null);
       return;
     }
+
+    retain(packId, path);
+
     const cached = peekUrl(packId, path);
     if (cached) {
       setUrl(cached);
-      return;
+      return () => release(packId, path);
     }
 
     let alive = true;
@@ -25,6 +34,7 @@ export function useTexture(packId: string | null, path: string | null): string |
     });
     return () => {
       alive = false;
+      release(packId, path);
     };
   }, [packId, path]);
 

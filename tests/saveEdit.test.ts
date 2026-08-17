@@ -97,4 +97,51 @@ describe('saveEdit', () => {
       SWORD_KEY,
     ]);
   });
+
+  /**
+   * An animated texture is a filmstrip plus a .png.mcmeta saying how to play it.
+   * The editor only replaces the strip, so without carrying the companion over
+   * the export shipped a strip with no animation block and the game squashed
+   * every frame onto one face.
+   */
+  it('carries the animation .mcmeta into the edit', async () => {
+    const { buildSlotIndex } = await import('../src/core/resolve');
+    const { storePack } = await import('../src/db/idb');
+
+    const mcmeta = new TextEncoder().encode('{"animation":{"frametime":2}}');
+    const animatedIndex = [
+      { path: 'assets/minecraft/textures/items/sword_diamond.png', size: 300, hash: 'orig' },
+      { path: 'assets/minecraft/textures/items/sword_diamond.png.mcmeta', size: mcmeta.length, hash: 'meta' },
+    ];
+
+    // The bytes have to be readable, since saveEdit copies them across.
+    await storePack(
+      { ...sourcePack, id: 'pack-anim' },
+      [
+        { path: animatedIndex[0].path, bytes: new Uint8Array([1, 2, 3]) },
+        { path: animatedIndex[1].path, bytes: mcmeta },
+      ],
+      animatedIndex,
+    );
+
+    useStore.setState({
+      packs: [{ ...sourcePack, id: 'pack-anim' }],
+      indexes: { 'pack-anim': animatedIndex },
+      slots: buildSlotIndex([{ id: 'pack-anim', era: 'legacy', files: animatedIndex }]),
+      packOrder: ['pack-anim'],
+      picks: {},
+    });
+
+    await useStore.getState().saveEdit(SWORD_KEY, editedBytes, 16, 32);
+
+    const path = editStoragePath(SWORD_KEY)!;
+    const paths = (await getFileIndex(EDITS_PACK_ID)).map((f) => f.path);
+    expect(paths).toContain(`${path}.mcmeta`);
+    expect([...(await getFileBytes(EDITS_PACK_ID, `${path}.mcmeta`))!]).toEqual([...mcmeta]);
+
+    // And the exporter sees it, because it travels as a companion of the PNG.
+    const slot = useStore.getState().slots.find((s) => s.key === SWORD_KEY);
+    const edited = slot?.candidates.find((c) => c.packId === EDITS_PACK_ID);
+    expect(edited?.companions).toEqual([`${path}.mcmeta`]);
+  });
 });
