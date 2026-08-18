@@ -6,6 +6,7 @@ import { createEditsPack, editStoragePath, EDITS_PACK_ID } from '../core/editsPa
 import { hashBytes } from '../core/hash';
 import * as db from '../db/idb';
 import { dropPack, dropFile } from '../lib/textureCache';
+import { downloadBytes } from '../lib/download';
 import { playSuccess } from '../lib/sfx';
 import {
   loadSession, reconcile, restorePicks, saveSession,
@@ -144,18 +145,6 @@ const remember = (s: State): Pick<State, 'past' | 'future'> => ({
   past: [...s.past, { picks: s.picks, packOrder: s.packOrder }].slice(-MAX_HISTORY),
   future: [],
 });
-
-function download(bytes: Uint8Array | string, filename: string, mime: string) {
-  const blob = typeof bytes === 'string'
-    ? new Blob([bytes], { type: mime })
-    : new Blob([new Uint8Array(bytes)], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
 
 const slug = (s: string) => s.trim().replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'dreampack';
 
@@ -582,7 +571,7 @@ export const useStore = create<State>((set, get) => ({
           },
         }));
       } else if (msg.type === 'done') {
-        download(msg.bytes, `${slug(get().projectName)}.zip`, 'application/zip');
+        downloadBytes(msg.bytes, `${slug(get().projectName)}.zip`, 'application/zip');
         playSuccess();
         set({
           exportStatus: {
@@ -685,7 +674,7 @@ export const useStore = create<State>((set, get) => ({
       packs: s.packOrder.map((id) => ({ id, name: s.packs.find((p) => p.id === id)?.name ?? id })),
       picks: s.picks,
     };
-    download(JSON.stringify(payload, null, 2), `${slug(s.projectName)}.dreampack`, 'application/json');
+    downloadBytes(JSON.stringify(payload, null, 2), `${slug(s.projectName)}.dreampack`, 'application/json');
   },
 
   async importProjectFile(file) {

@@ -71,6 +71,14 @@ Assets with no known cross-era name are marked `!` and pass through under their
 original filename — which is always correct when the source and target are the
 same era.
 
+Packs that cover several versions often ship an asset twice, once under each
+spelling. Both are the same asset, so such a pack offers **one** candidate for
+that slot — the spelling its own version reads — and the copy it does not use is
+named in that candidate's tooltip. The fold does not depend on which era the pack
+was detected as: era is a guess from the majority of a pack's paths, and letting
+it decide identity meant a stray `wool_colored_red.png` in a 1.20 pack became a
+slot of its own that then exported over the top of the real red wool.
+
 Supported targets: **1.8.9** (default), 1.12.2, 1.16.5, 1.20.1, 1.21.4. The rename
 table is deepest for 1.8.9 ↔ modern; `src/core/versions.ts` is the single place to
 add a version or correct a `pack_format`.
@@ -78,10 +86,45 @@ add a version or correct a `pack_format`.
 ## Editing textures
 
 Select any texture and hit **Edit Texture**. You get a pixel editor with a
-pencil, eraser, fill bucket and eyedropper (`B` / `E` / `G` / `I`), a colour
-picker with an alpha slider, three palettes — a general pixel-art set, your recent
-colours, and the colours already in the texture you're editing — plus undo/redo
-(`Ctrl+Z` / `Ctrl+Shift+Z`), zoom, and a pixel grid.
+select tool, pencil, eraser, fill bucket and eyedropper
+(`M` / `B` / `E` / `G` / `I`), a colour picker with an alpha slider, three
+palettes — a general pixel-art set, your recent colours, and the colours already
+in the texture you're editing — plus undo/redo (`Ctrl+Z` / `Ctrl+Shift+Z`), zoom,
+and a pixel grid.
+
+**select** (`M`) drags out a box. Painting, erasing and filling then only land
+inside it, and the fill stops at its edge — the eyedropper is the exception,
+since sampling can't damage anything. Drag inside the box to carry those pixels
+somewhere else, or drag one of its eight handles to rescale them,
+nearest-neighbour. `Ctrl+A` selects everything, `Ctrl+D` or `Esc` drops the
+selection, `Delete` clears what's inside it.
+
+A piece stays *floating* while you place it: the copy taken when you first moved
+it is what every later drag resamples from, so squashing it down to a texel and
+pulling it back out returns the artwork rather than a blur. It lands when you
+deselect, switch to a paint tool, or save, and the whole transform — however many
+drags it took — is a single `Ctrl+Z`.
+
+**wand** (`W`) selects by colour instead of by dragging: click a pixel and every
+similar pixel joins the selection. **tolerance** sets how similar counts, and
+**same colour everywhere** switches between the connected patch you clicked and
+every matching pixel in the texture — the latter is how you recolour all the blue
+on a sword at once. The selection is then a shape rather than a box, and painting,
+erasing, filling and adjusting all follow it.
+
+**Adjust** recolours instead of repainting: hue (±180°), saturation (0–200%) and
+exposure (±2 EV), applied live. Most of the time someone wants the same artwork in
+another shade, not a different texture.
+
+Like a floating selection, an adjustment is non-destructive while you work: the
+first slider move keeps a copy of the pixels and every later move re-derives from
+it, so returning the sliders to neutral returns the exact original — running an
+8-bit colour transform over its own output loses a little more each pass. **apply**
+keeps the change and starts a fresh one, **reset** puts the original colours back,
+and the whole adjustment is a single `Ctrl+Z`. With a selection active only the
+boxed area changes, so you can recolour just the blade of a sword. Fully
+transparent pixels are skipped — a hue shift on invisible pixels turns into
+coloured fringing the moment the texture is scaled.
 
 **Size** resamples the texture to 16, 32, 64, 128 or 256 wide. A texture is not
 stuck at whatever resolution its source pack shipped — this is how you take a 16x
@@ -91,7 +134,12 @@ blurred mess, and the aspect ratio is held: an animated texture is a filmstrip o
 N square frames, and changing its proportions would silently change how many
 frames the game thinks it has.
 
-**import image** draws a PNG or JPG onto the texture. By default it is scaled to
+**export** downloads the texture as a PNG, unsaved work included. It is named the
+way your target version names it — `wool_colored_red.png` for 1.8.9,
+`red_wool.png` for 1.20.1 — so the file can go straight into a pack directory, or
+into another editor and back through **import**.
+
+**import** draws a PNG or JPG onto the texture. By default it is scaled to
 the texture's existing dimensions, keeping its proportions and letterboxing the
 remainder, because a resource pack expects a given size - and for animated
 textures, a given filmstrip shape. Tick **keep source size** to adopt the

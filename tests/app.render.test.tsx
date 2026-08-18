@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, afterEach, beforeEach } from 'vitest';
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
 import { act, cleanup, render, waitFor, within } from '@testing-library/react';
 import { App } from '../src/App';
 import { useStore } from '../src/state/store';
@@ -75,8 +75,8 @@ describe('App renders', () => {
     const a = pack('a', '#55FF55');
     const b = pack('b', '#55FFFF');
     const indexes = {
-      a: items({ sword_diamond: 'h1', apple_golden: 'h2' }),
-      b: items({ sword_diamond: 'h3' }),
+      a: items({ diamond_sword: 'h1', apple_golden: 'h2' }),
+      b: items({ diamond_sword: 'h3' }),
     };
 
     act(() => {
@@ -143,6 +143,52 @@ describe('App renders', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0][0].name).toBe('MyPack.zip');
+  });
+
+  /**
+   * A pack covering several game versions ships an asset under both spellings.
+   * Both used to become candidates, so the strip grew a second chip for the same
+   * pack that could never win the slot: clicking it picked the pack, and the
+   * pack's first file answered. It had to stop being a chip at all.
+   */
+  it('shows one chip per pack when a pack ships an asset twice', async () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    });
+
+    const view = await mount();
+
+    const a = pack('a', '#55FF55');
+    const b = pack('b', '#55FFFF');
+    const indexes = {
+      a: [
+        { path: 'assets/minecraft/textures/blocks/cobblestone_mossy.png', size: 300, hash: 'h1' },
+        { path: 'assets/minecraft/textures/block/mossy_cobblestone.png', size: 300, hash: 'h2' },
+      ],
+      b: [
+        { path: 'assets/minecraft/textures/blocks/cobblestone_mossy.png', size: 300, hash: 'h3' },
+      ],
+    };
+
+    act(() => {
+      useStore.setState({
+        packs: [a, b],
+        indexes,
+        packOrder: ['a', 'b'],
+        category: 'Blocks',
+        slots: buildSlotIndex([
+          { id: 'a', era: 'legacy', files: indexes.a },
+          { id: 'b', era: 'legacy', files: indexes.b },
+        ]),
+      });
+    });
+    act(() => useStore.getState().select('texture:block/mossy_cobblestone'));
+
+    expect(view.getByText(/From which pack \(2\)/)).toBeTruthy();
+    expect(warnings.filter((w) => w.includes('two children with the same key'))).toEqual([]);
+
+    spy.mockRestore();
   });
 
   it('reorders pack priority', async () => {

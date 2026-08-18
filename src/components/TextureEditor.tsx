@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { resolveSlot } from '../core/resolve';
+import { denormalize } from '../core/canonical';
+import { getVersion } from '../core/versions';
+import { downloadBlob } from '../lib/download';
 import { MCButton, MCCheckbox } from './mc/MCPrimitives';
 import { useTexture } from '../lib/useTexture';
 import { playClick, playPaint, playPop, playThud } from '../lib/sfx';
+import {
+  clampRect, countCovered, covers, dragHandle, hitHandle, rectFromDrag, texelFromClient,
+  type Handle, type HitTarget, type Rect, type Selection,
+} from '../lib/selection';
+import { scaleMask, selectSimilar } from '../lib/wand';
+import {
+  crop, drawScaled, floodFill, getPixel, setPixel,
+  type PixelBuffer, type RGBA,
+} from '../lib/pixelBuffer';
+import { adjustInto, isNeutral, NEUTRAL, type Adjustment } from '../lib/adjust';
 
-type Tool = 'pencil' | 'eraser' | 'bucket' | 'eyedropper';
-
-interface RGBA {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
+type Tool = 'select' | 'wand' | 'pencil' | 'eraser' | 'bucket' | 'eyedropper';
 
 /** One point on the editor's undo stack, dimensions included. */
 interface Snapshot {
@@ -38,6 +44,17 @@ const MAX_UNDO = 60;
  */
 const SIZES = [16, 32, 64, 128, 256];
 
+/** Size of a selection handle, in screen pixels, so it is grabbable at any zoom. */
+const HANDLE = 9;
+
+const CURSOR_FOR: Record<string, string> = {
+  nw: 'nwse-resize', se: 'nwse-resize',
+  ne: 'nesw-resize', sw: 'nesw-resize',
+  n: 'ns-resize', s: 'ns-resize',
+  w: 'ew-resize', e: 'ew-resize',
+  inside: 'move',
+};
+
 const hexToRgba = (hex: string, alpha: number): RGBA => ({
   r: parseInt(hex.slice(1, 3), 16),
   g: parseInt(hex.slice(3, 5), 16),
@@ -51,7 +68,7 @@ const toHex = (c: RGBA) =>
 const cssOf = (c: RGBA) => `rgba(${c.r},${c.g},${c.b},${(c.a / 255).toFixed(3)})`;
 
 export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: () => void }) {
-  const { slots, packOrder, picks, saveEdit } = useStore();
+  const { slots, packOrder, picks, saveEdit, targetVersion } = useStore();
 
   const slot = useMemo(() => slots.find((s) => s.key === slotKey) ?? null, [slots, slotKey]);
   const winner = useMemo(
@@ -72,9 +89,44 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
   const importRef = useRef<HTMLInputElement>(null);
   const lastPixelRef = useRef<string>('');
 
+  /**
+   * A transform in progress: the pixels as they were when they were lifted, and
+   * where they currently sit.
+   *
+   * The crop is the only thing a drag ever resamples from, so scaling a piece
+   * down to a texel and back up returns the artwork rather than the blur that
+   * resampling the last result would leave.
+   */
+  const floatRef = useRef<{ source: PixelBuffer; rect: Rect } | null>(null);
+  /**
+   * The pixels as they were before the current colour adjustment, and the region
+   * it covers.
+   *
+   * Every slider move re-derives from this rather than from the last result:
+   * running an 8-bit colour transform over its own output loses a little more on
+   * each pass, so sliding back to neutral has to *return* to the original rather
+   * than approach it.
+   */
+  const adjustBaseRef = useRef<{ source: PixelBuffer; area: Selection | null } | null>(null);
+  const gestureRef = useRef<
+    | {
+        mode: 'new' | 'move' | 'resize';
+        handle: Handle | null;
+        startRect: Rect;
+        startX: number;
+        startY: number;
+      }
+    | null
+  >(null);
+
   const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
   const [zoom, setZoom] = useState(12);
   const [tool, setTool] = useState<Tool>('pencil');
+  const [selection, setSelection] = useState<Selection | null>(null);
+  /** How far a colour may differ and still be picked up by the wand. */
+  const [tolerance, setTolerance] = useState(0.12);
+  const [everywhere, setEverywhere] = useState(false);
+  const [adjustment, setAdjustment] = useState<Adjustment>(NEUTRAL);
   const [color, setColor] = useState<RGBA>({ r: 255, g: 255, b: 255, a: 255 });
   const [recent, setRecent] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -135,7 +187,112 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
       }
       ctx.stroke();
     }
-  }, [zoom, grid]);
+
+    // Lifted pixels ride above the texture until they are stamped down, so the
+    // hole they came from stays visible underneath while they are being placed.
+    const float = floatRef.current;
+    if (float) {
+      const piece = document.createElement('canvas');
+      piece.width = float.source.width;
+      piece.height = float.source.height;
+      piece.getContext('2d')?.putImageData(
+        new ImageData(
+          new Uint8ClampedArray(float.source.data),
+          float.source.width,
+          float.source.height,
+        ),
+        0,
+        0,
+      );
+      ctx.drawImage(
+        piece,
+        float.rect.x * zoom, float.rect.y * zoom,
+        float.rect.w * zoom, float.rect.h * zoom,
+      );
+    }
+
+    if (!selection) return;
+
+    const { rect } = selection;
+    const sx = rect.x * zoom;
+    const sy = rect.y * zoom;
+    const sw = rect.w * zoom;
+    const sh = rect.h * zoom;
+    const selecting = tool === 'select' || tool === 'wand';
+
+    // Dim the rest only while selecting. Under a paint tool it would falsify the
+    // colours you are trying to match.
+    if (selecting) {
+      // Everything except the selected texels, as one even-odd path: a wand
+      // selection is a shape, so four rectangles around a box will not do.
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.rect(0, 0, canvas.width, canvas.height);
+      for (let y = rect.y; y < rect.y + rect.h; y++) {
+        let runStart = -1;
+        for (let x = rect.x; x <= rect.x + rect.w; x++) {
+          const inside = x < rect.x + rect.w && covers(selection, x, y);
+          if (inside && runStart === -1) runStart = x;
+          if (!inside && runStart !== -1) {
+            ctx.rect(runStart * zoom, y * zoom, (x - runStart) * zoom, zoom);
+            runStart = -1;
+          }
+        }
+      }
+      ctx.fill('evenodd');
+    }
+
+    // White over black, so the outline reads on any artwork.
+    const outline = new Path2D();
+    if (selection.mask) {
+      // Trace the edge of the shape: a side is drawn wherever its neighbour is out.
+      for (let y = rect.y; y < rect.y + rect.h; y++) {
+        for (let x = rect.x; x < rect.x + rect.w; x++) {
+          if (!covers(selection, x, y)) continue;
+          const px = x * zoom;
+          const py = y * zoom;
+          if (!covers(selection, x, y - 1)) { outline.moveTo(px, py); outline.lineTo(px + zoom, py); }
+          if (!covers(selection, x, y + 1)) { outline.moveTo(px, py + zoom); outline.lineTo(px + zoom, py + zoom); }
+          if (!covers(selection, x - 1, y)) { outline.moveTo(px, py); outline.lineTo(px, py + zoom); }
+          if (!covers(selection, x + 1, y)) { outline.moveTo(px + zoom, py); outline.lineTo(px + zoom, py + zoom); }
+        }
+      }
+    } else {
+      outline.rect(sx + 1, sy + 1, Math.max(1, sw - 2), Math.max(1, sh - 2));
+    }
+
+    ctx.setLineDash([]);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#000';
+    ctx.stroke(outline);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#fff';
+    if (!selection.mask) ctx.setLineDash([6, 6]);
+    ctx.stroke(outline);
+    ctx.setLineDash([]);
+
+    // Handles sit on the bounding box; a shape is still moved and scaled by it.
+    if (!selecting) return;
+
+    // A box against the edge of the texture would have half of its handles drawn
+    // off the canvas, which reads as though that side cannot be resized.
+    const onCanvas = (v: number, limit: number) =>
+      Math.max(HANDLE / 2, Math.min(v, limit - HANDLE / 2));
+
+    for (const [hx, hy] of [
+      [sx, sy], [sx + sw / 2, sy], [sx + sw, sy],
+      [sx, sy + sh / 2], [sx + sw, sy + sh / 2],
+      [sx, sy + sh], [sx + sw / 2, sy + sh], [sx + sw, sy + sh],
+    ]) {
+      const cx = onCanvas(hx, canvas.width);
+      const cy = onCanvas(hy, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - HANDLE / 2, cy - HANDLE / 2, HANDLE, HANDLE);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx - HANDLE / 2, cy - HANDLE / 2, HANDLE, HANDLE);
+    }
+  }, [zoom, grid, selection, tool]);
 
   // Load the resolved texture into the working buffer.
   useEffect(() => {
@@ -193,61 +350,255 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     syncHistory();
   }, [syncHistory]);
 
-  const setPixel = (pixels: ImageData, x: number, y: number, c: RGBA) => {
-    const i = (y * pixels.width + x) * 4;
-    pixels.data[i] = c.r;
-    pixels.data[i + 1] = c.g;
-    pixels.data[i + 2] = c.b;
-    pixels.data[i + 3] = c.a;
-  };
-
-  const getPixel = (pixels: ImageData, x: number, y: number): RGBA => {
-    const i = (y * pixels.width + x) * 4;
-    return {
-      r: pixels.data[i],
-      g: pixels.data[i + 1],
-      b: pixels.data[i + 2],
-      a: pixels.data[i + 3],
-    };
-  };
-
-  const floodFill = (pixels: ImageData, x: number, y: number, c: RGBA) => {
-    const target = getPixel(pixels, x, y);
-    const same = (p: RGBA) => p.r === target.r && p.g === target.g && p.b === target.b && p.a === target.a;
-    if (same(c)) return;
-
-    const stack: Array<[number, number]> = [[x, y]];
-    const seen = new Uint8Array(pixels.width * pixels.height);
-
-    while (stack.length > 0) {
-      const [cx, cy] = stack.pop()!;
-      if (cx < 0 || cy < 0 || cx >= pixels.width || cy >= pixels.height) continue;
-      const flat = cy * pixels.width + cx;
-      if (seen[flat]) continue;
-      if (!same(getPixel(pixels, cx, cy))) continue;
-
-      seen[flat] = 1;
-      setPixel(pixels, cx, cy, c);
-      stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
-    }
-  };
-
   const rememberColor = (c: RGBA) => {
     const hex = toHex(c);
     setRecent((list) => [hex, ...list.filter((h) => h !== hex)].slice(0, 16));
   };
 
-  const applyAt = (clientX: number, clientY: number, isStart: boolean) => {
+  // ---- Selection ---------------------------------------------------------
+
+  /**
+   * Take the selected pixels out of the texture and hold them.
+   *
+   * One undo snapshot is pushed here and none when the piece is put back down,
+   * so however many drags a transform took, ctrl+z is a single step back to
+   * before it started.
+   */
+  const lift = (sel: Selection) => {
+    const pixels = pixelsRef.current;
+    if (!pixels || floatRef.current) return;
+    pushUndo();
+
+    // Only the selected texels travel. Everything the mask leaves out is blanked
+    // in the copy and left alone in the texture, so moving a wand selection
+    // carries the shape rather than the box around it.
+    const source = crop(pixels, sel.rect);
+    for (let y = 0; y < sel.rect.h; y++) {
+      for (let x = 0; x < sel.rect.w; x++) {
+        if (covers(sel, sel.rect.x + x, sel.rect.y + y)) {
+          setPixel(pixels, sel.rect.x + x, sel.rect.y + y, { r: 0, g: 0, b: 0, a: 0 });
+        } else {
+          setPixel(source, x, y, { r: 0, g: 0, b: 0, a: 0 });
+        }
+      }
+    }
+
+    floatRef.current = { source, rect: sel.rect };
+    setDirty(true);
+  };
+
+  /** Write the lifted pixels into the texture at wherever they ended up. */
+  const stampFloat = () => {
+    const float = floatRef.current;
+    const pixels = pixelsRef.current;
+    if (!float || !pixels) return;
+    drawScaled(pixels, float.source, float.rect);
+    floatRef.current = null;
+    setDirty(true);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+  };
+
+  /** Drop the lifted pixels unwritten - undo is about to restore the hole too. */
+  const discardFloat = () => {
+    floatRef.current = null;
+  };
+
+  const deselect = () => {
+    stampFloat();
+    commitAdjustment();
+    setSelection(null);
+    gestureRef.current = null;
+    setHistoryTick((t) => t + 1);
+  };
+
+  // ---- Colour adjustment -------------------------------------------------
+
+  /**
+   * Re-derive the texture from the pixels held before the adjustment started.
+   *
+   * The first move takes that copy and pushes the single undo entry covering the
+   * whole adjustment, however many times the sliders move afterwards.
+   */
+  const applyAdjustment = (next: Adjustment) => {
+    const pixels = pixelsRef.current;
+    if (!pixels) return;
+
+    if (!adjustBaseRef.current) {
+      // A piece being carried lands first, so it is recoloured along with the
+      // rest instead of being dropped on top afterwards, unadjusted.
+      stampFloat();
+      pushUndo();
+      adjustBaseRef.current = {
+        source: {
+          data: new Uint8ClampedArray(pixels.data),
+          width: pixels.width,
+          height: pixels.height,
+        },
+        area: selection,
+      };
+    }
+
+    const base = adjustBaseRef.current;
+    adjustInto(pixels, base.source, next, base.area ?? undefined);
+
+    setAdjustment(next);
+    setDirty(true);
+    repaint();
+  };
+
+  /** Keep the adjustment and start a fresh one from where it left off. */
+  const commitAdjustment = () => {
+    if (!adjustBaseRef.current) return;
+    adjustBaseRef.current = null;
+    setAdjustment(NEUTRAL);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+  };
+
+  const resetAdjustment = () => {
+    const base = adjustBaseRef.current;
+    const pixels = pixelsRef.current;
+    if (!base || !pixels) return;
+
+    pixels.data.set(base.source.data);
+    adjustBaseRef.current = null;
+    setAdjustment(NEUTRAL);
+    setDirty(true);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+    repaint();
+    playThud();
+  };
+
+  /** Drop the adjustment unrestored - undo is about to put the pixels back. */
+  const discardAdjustment = () => {
+    adjustBaseRef.current = null;
+    setAdjustment(NEUTRAL);
+  };
+
+  /**
+   * Pointer position in texture coordinates, continuous so edges can be hit.
+   *
+   * The canvas is measured including its border and drawn inside it, so the two
+   * boxes have to be told apart here - see `texelFromClient`.
+   */
+  const toTexel = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     const pixels = pixelsRef.current;
-    if (!canvas || !pixels) return;
+    if (!canvas || !pixels) return null;
 
     const rect = canvas.getBoundingClientRect();
-    const x = Math.floor(((clientX - rect.left) / rect.width) * pixels.width);
-    const y = Math.floor(((clientY - rect.top) / rect.height) * pixels.height);
+    const style = getComputedStyle(canvas);
+    const box = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      borderLeft: parseFloat(style.borderLeftWidth) || 0,
+      borderTop: parseFloat(style.borderTopWidth) || 0,
+      borderRight: parseFloat(style.borderRightWidth) || 0,
+      borderBottom: parseFloat(style.borderBottomWidth) || 0,
+    };
+
+    return texelFromClient(clientX, clientY, box, pixels.width, pixels.height);
+  };
+
+  /** A handle is drawn in screen pixels, so its grab area is that many texels. */
+  const grabTolerance = () => Math.max(0.35, HANDLE / zoom / 2);
+
+  const hitAt = (clientX: number, clientY: number): HitTarget => {
+    const point = toTexel(clientX, clientY);
+    if (!point || !selection) return null;
+    return hitHandle(selection.rect, point.x, point.y, grabTolerance());
+  };
+
+  const beginSelect = (clientX: number, clientY: number) => {
+    const point = toTexel(clientX, clientY);
+    const pixels = pixelsRef.current;
+    if (!point || !pixels) return;
+
+    const target = selection ? hitHandle(selection.rect, point.x, point.y, grabTolerance()) : null;
+
+    // The adjustment covers whatever was selected when it began, so changing the
+    // selection settles it rather than leaving it pointing at the old region.
+    commitAdjustment();
+
+    // Starting a box somewhere else puts any piece being carried back down first.
+    if (target === null) {
+      stampFloat();
+      const x = Math.floor(point.x);
+      const y = Math.floor(point.y);
+      const started = clampRect({ x, y, w: 1, h: 1 }, pixels.width, pixels.height);
+      gestureRef.current = {
+        mode: 'new', handle: null, startRect: started, startX: point.x, startY: point.y,
+      };
+      setSelection({ rect: started, mask: null });
+      return;
+    }
+
+    gestureRef.current = {
+      mode: target === 'inside' ? 'move' : 'resize',
+      handle: target === 'inside' ? null : target,
+      startRect: selection!.rect,
+      startX: point.x,
+      startY: point.y,
+    };
+  };
+
+  const dragSelect = (clientX: number, clientY: number) => {
+    const gesture = gestureRef.current;
+    const point = toTexel(clientX, clientY);
+    const pixels = pixelsRef.current;
+    if (!gesture || !point || !pixels) return;
+
+    let next: Rect;
+
+    if (gesture.mode === 'new') {
+      next = rectFromDrag(
+        gesture.startRect.x, gesture.startRect.y,
+        Math.floor(point.x), Math.floor(point.y),
+      );
+    } else if (gesture.mode === 'move') {
+      const dx = Math.round(point.x - gesture.startX);
+      const dy = Math.round(point.y - gesture.startY);
+      // Nothing is lifted until the piece actually moves, so a click inside the
+      // box to reposition it does not punch a hole and cost an undo step.
+      if (dx === 0 && dy === 0) return;
+      lift(selection ?? { rect: gesture.startRect, mask: null });
+      next = { ...gesture.startRect, x: gesture.startRect.x + dx, y: gesture.startRect.y + dy };
+    } else {
+      const resized = dragHandle(gesture.startRect, gesture.handle!, point.x, point.y);
+      if (
+        resized.x === gesture.startRect.x && resized.y === gesture.startRect.y
+        && resized.w === gesture.startRect.w && resized.h === gesture.startRect.h
+      ) return;
+      lift(selection ?? { rect: gesture.startRect, mask: null });
+      next = resized;
+    }
+
+    const clamped = clampRect(next, pixels.width, pixels.height);
+    if (floatRef.current) floatRef.current.rect = clamped;
+    // The mask is resampled exactly as the pixels are, so a shape stays matched
+    // to its own artwork through a resize.
+    setSelection((current) => ({
+      rect: clamped,
+      mask: current ? scaleMask(current.mask, gesture.startRect, clamped) : null,
+    }));
+  };
+
+  const applyAt = (clientX: number, clientY: number, isStart: boolean) => {
+    const pixels = pixelsRef.current;
+    const point = toTexel(clientX, clientY);
+    if (!pixels || !point) return;
+
+    const x = Math.floor(point.x);
+    const y = Math.floor(point.y);
     if (x < 0 || y < 0 || x >= pixels.width || y >= pixels.height) return;
 
     if (tool === 'eyedropper') {
+      // Deliberately not clamped to the selection: sampling cannot damage the
+      // texture, and a pick that silently did nothing would read as a bug.
       const picked = getPixel(pixels, x, y);
       setColor(picked);
       rememberColor(picked);
@@ -255,6 +606,12 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
       setTool('pencil');
       return;
     }
+
+    if (selection && !covers(selection, x, y)) return;
+
+    // Painting settles the colour adjustment first, so "reset" always means the
+    // sliders and never the brushwork done while they were open.
+    commitAdjustment();
 
     // Dragging across one pixel repeatedly should not spam undo entries or sound.
     const id = `${x},${y}`;
@@ -264,7 +621,7 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     if (isStart) pushUndo();
 
     if (tool === 'bucket') {
-      floodFill(pixels, x, y, color);
+      floodFill(pixels, x, y, color, selection ?? undefined);
       rememberColor(color);
       playPop();
     } else if (tool === 'eraser') {
@@ -291,6 +648,17 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
       pixelsRef.current = next;
       setDims({ width: target.width, height: target.height });
     }
+    // A snapshot can be from before a resize, and a box hanging off the edge of
+    // the texture would let you paint at coordinates that no longer exist.
+    setSelection((current) => {
+      if (!current) return null;
+      const rect = clampRect(current.rect, target.width, target.height);
+      // A mask belongs to the box it was cut from; if that box had to move, the
+      // shape no longer lines up with anything and the box is what survives.
+      const same = rect.x === current.rect.x && rect.y === current.rect.y
+        && rect.w === current.rect.w && rect.h === current.rect.h;
+      return { rect, mask: same ? current.mask : null };
+    });
     setDirty(true);
     setStrokeTick((t) => t + 1);
     setHistoryTick((t) => t + 1);
@@ -299,6 +667,12 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
   };
 
   const undo = () => {
+    // Undo during a transform throws the carried pixels away rather than
+    // stamping them: the snapshot it restores is from before they were lifted,
+    // so it puts back both the piece and the hole in one step. The same goes for
+    // a colour adjustment: its snapshot predates the first slider move.
+    discardFloat();
+    discardAdjustment();
     const pixels = pixelsRef.current;
     const previous = undoRef.current.pop();
     if (!pixels || !previous) return;
@@ -307,6 +681,8 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
   };
 
   const redo = () => {
+    discardFloat();
+    discardAdjustment();
     const pixels = pixelsRef.current;
     const next = redoRef.current.pop();
     if (!pixels || !next) return;
@@ -332,6 +708,11 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
         URL.revokeObjectURL(url);
         return;
       }
+      // The texture is about to be redrawn, possibly at another size; a piece
+      // being carried has to land before that happens.
+      stampFloat();
+      commitAdjustment();
+      setSelection(null);
       pushUndo();
 
       const width = keepSourceSize ? image.naturalWidth : current.width;
@@ -384,6 +765,9 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
    * would silently change how many frames the game thinks it has.
    */
   const resizeTo = (targetWidth: number) => {
+    stampFloat();
+    commitAdjustment();
+    setSelection(null);
     const current = pixelsRef.current;
     if (!current || current.width === targetWidth) return;
 
@@ -421,6 +805,9 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
   };
 
   const handleSave = async () => {
+    // Whatever is being carried is part of the texture the moment it is saved.
+    stampFloat();
+    commitAdjustment();
     const pixels = pixelsRef.current;
     if (!pixels || saving) return;
     setSaving(true);
@@ -443,16 +830,104 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
     onClose();
   };
 
+  /**
+   * Download the texture as it stands, unsaved work included.
+   *
+   * It is named the way the target version names it, so the file that comes out
+   * can be dropped straight into a pack directory - or into another editor and
+   * back in through **import image** - without having to work out what Minecraft
+   * calls this texture on that version.
+   */
+  const exportPng = () => {
+    stampFloat();
+    commitAdjustment();
+    const pixels = pixelsRef.current;
+    if (!pixels) return;
+
+    const scratch = document.createElement('canvas');
+    scratch.width = pixels.width;
+    scratch.height = pixels.height;
+    scratch.getContext('2d')?.putImageData(pixels, 0, 0);
+
+    const path = denormalize(slotKey, getVersion(targetVersion));
+    const name = path?.split('/').pop()
+      ?? `${slot?.displayName.replace(/\W+/g, '_').toLowerCase() ?? 'texture'}.png`;
+
+    scratch.toBlob((blob) => {
+      if (!blob) return;
+      downloadBlob(blob, name);
+      playPop();
+    }, 'image/png');
+  };
+
   const handleExit = () => {
     if (dirty && !window.confirm('Discard your changes to this texture?')) return;
     playThud();
     onClose();
   };
 
+  /** Switching to a paint tool ends any transform, so the piece lands. */
+  const chooseTool = (next: Tool) => {
+    if (next !== 'select' && next !== 'wand') stampFloat();
+    setTool(next);
+    setHistoryTick((t) => t + 1);
+  };
+
+  /** Wipe what is selected: the carried piece if there is one, else the pixels. */
+  const clearSelected = () => {
+    const pixels = pixelsRef.current;
+    if (!pixels || !selection) return;
+    if (floatRef.current) {
+      discardFloat();
+    } else {
+      pushUndo();
+      for (let y = selection.rect.y; y < selection.rect.y + selection.rect.h; y++) {
+        for (let x = selection.rect.x; x < selection.rect.x + selection.rect.w; x++) {
+          if (covers(selection, x, y)) setPixel(pixels, x, y, { r: 0, g: 0, b: 0, a: 0 });
+        }
+      }
+    }
+    setDirty(true);
+    setStrokeTick((t) => t + 1);
+    setHistoryTick((t) => t + 1);
+    playThud();
+  };
+
+  const selectAll = () => {
+    if (!dims) return;
+    stampFloat();
+    commitAdjustment();
+    setSelection({ rect: { x: 0, y: 0, w: dims.width, h: dims.height }, mask: null });
+    playClick();
+  };
+
+  /** Select the pixels matching the one clicked - the wand. */
+  const wandAt = (clientX: number, clientY: number) => {
+    const point = toTexel(clientX, clientY);
+    const pixels = pixelsRef.current;
+    if (!point || !pixels) return;
+
+    stampFloat();
+    commitAdjustment();
+    const picked = selectSimilar(
+      pixels, Math.floor(point.x), Math.floor(point.y), tolerance, everywhere,
+    );
+    if (!picked) return;
+    setSelection(picked);
+    playPop();
+  };
+
   // Keyboard shortcuts mirror the usual pixel-art editors.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Escape backs out one level at a time: the selection first, the editor
+        // only once there is nothing selected to leave.
+        if (selection) {
+          deselect();
+          playThud();
+          return;
+        }
         handleExit();
         return;
       }
@@ -462,9 +937,32 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
         else undo();
         return;
       }
-      const map: Record<string, Tool> = { b: 'pencil', e: 'eraser', g: 'bucket', i: 'eyedropper' };
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (selection) {
+          deselect();
+          playThud();
+        }
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (!selection) return;
+        e.preventDefault();
+        clearSelected();
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) return;
+
+      const map: Record<string, Tool> = {
+        m: 'select', w: 'wand', b: 'pencil', e: 'eraser', g: 'bucket', i: 'eyedropper',
+      };
       const next = map[e.key.toLowerCase()];
-      if (next) setTool(next);
+      if (next) chooseTool(next);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -527,6 +1025,8 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
                 and the shortcut hint fits better this way. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 10px' }}>
               {([
+                ['select', 'select', 'Select - drag a box, move it, drag its handles to resize. Painting only lands inside it (M)'],
+                ['wand', 'wand', 'Wand - click a pixel to select everything that colour, so you can recolour just that part (W)'],
                 ['pencil', 'draw', 'Pencil - paint single pixels (B)'],
                 ['eraser', 'erase', 'Eraser - clear pixels to transparent (E)'],
                 ['bucket', 'fill', 'Fill - flood the matching area (G)'],
@@ -535,13 +1035,77 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
                 <MCButton
                   key={id}
                   small
-                  onClick={() => setTool(id)}
+                  onClick={() => chooseTool(id)}
                   title={hint}
                   style={tool === id ? { background: '#3a7d3a', color: '#fff' } : undefined}
                 >
                   {label}
                 </MCButton>
               ))}
+            </div>
+
+            {/* Selection: the box is a stencil for the paint tools and a handle
+                on the pixels themselves for the select tool. */}
+            <div className="section-title">Selection</div>
+            <div style={{ padding: '0 10px' }}>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <MCButton small onClick={selectAll} disabled={!dims} title="Select the whole texture (ctrl+A)">
+                  all
+                </MCButton>
+                <MCButton
+                  small
+                  onClick={() => {
+                    deselect();
+                    playThud();
+                  }}
+                  disabled={!selection}
+                  title="Drop the selection and paint anywhere again (ctrl+D)"
+                >
+                  none
+                </MCButton>
+                <MCButton
+                  small
+                  variant="danger"
+                  onClick={clearSelected}
+                  disabled={!selection}
+                  title="Clear the selected pixels to transparent (delete)"
+                >
+                  clear
+                </MCButton>
+              </div>
+              <label className="mc-text-shadow" style={{ fontSize: 16, display: 'block', marginTop: 8 }}>
+                wand tolerance {Math.round(tolerance * 100)}%
+                <input
+                  type="range"
+                  className="mc-range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(tolerance * 100)}
+                  onChange={(e) => setTolerance(Number(e.target.value) / 100)}
+                  title="How far a colour may differ and still be picked up. 0 takes only an exact match."
+                />
+              </label>
+              <div style={{ marginTop: 4 }}>
+                <MCCheckbox
+                  checked={everywhere}
+                  onChange={() => setEverywhere((v) => !v)}
+                  label="same colour everywhere"
+                  title={everywhere
+                    ? 'The wand takes every matching pixel in the texture'
+                    : 'The wand takes only the patch you clicked, stopping where the colour changes'}
+                />
+              </div>
+              <div
+                className="t-gray"
+                style={{ fontSize: 16, marginTop: 6, lineHeight: 'var(--lh-body)' }}
+              >
+                {selection
+                  ? selection.mask
+                    ? `${countCovered(selection)} pixels · painting stays inside`
+                    : `${selection.rect.w}×${selection.rect.h} at ${selection.rect.x},${selection.rect.y} · painting stays inside`
+                  : 'nothing selected · painting goes anywhere'}
+              </div>
             </div>
 
             {/* Resolution is not fixed to whatever the source pack shipped:
@@ -580,14 +1144,25 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
 
             <div className="section-title">Image</div>
             <div style={{ padding: '0 10px' }}>
-              <MCButton
-                small
-                onClick={() => importRef.current?.click()}
-                title="Draw a PNG or JPG onto this texture"
-                style={{ width: '100%' }}
-              >
-                import image
-              </MCButton>
+              <div className="row" style={{ gap: 6 }}>
+                <MCButton
+                  small
+                  onClick={() => importRef.current?.click()}
+                  title="Draw a PNG or JPG onto this texture"
+                  style={{ flex: 1 }}
+                >
+                  import
+                </MCButton>
+                <MCButton
+                  small
+                  onClick={exportPng}
+                  disabled={!dims}
+                  title={`Download this texture as a PNG, named the way ${getVersion(targetVersion).label.trim()} names it. Unsaved changes are included.`}
+                  style={{ flex: 1 }}
+                >
+                  export
+                </MCButton>
+              </div>
               <input
                 ref={importRef}
                 type="file"
@@ -610,6 +1185,71 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
                       : `The image is scaled to fit ${dims ? dims.width + 'x' + dims.height : 'the texture'}, keeping its proportions`
                   }
                 />
+              </div>
+            </div>
+
+            {/* Recolouring beats repainting: most people want the same artwork
+                in another shade, not a different texture. */}
+            <div className="section-title">Adjust</div>
+            <div style={{ padding: '0 10px' }}>
+              {([
+                ['hue', -180, 180, 1, adjustment.hue,
+                  `${adjustment.hue > 0 ? '+' : ''}${Math.round(adjustment.hue)}°`],
+                ['saturation', 0, 200, 5, adjustment.saturation * 100,
+                  `${Math.round(adjustment.saturation * 100)}%`],
+                ['exposure', -200, 200, 5, adjustment.exposure * 100,
+                  `${adjustment.exposure > 0 ? '+' : ''}${adjustment.exposure.toFixed(2)} EV`],
+              ] as Array<[keyof Adjustment, number, number, number, number, string]>)
+                .map(([name, min, max, step, value, label]) => (
+                  <label
+                    key={name}
+                    className="mc-text-shadow"
+                    style={{ fontSize: 16, display: 'block', marginTop: 6 }}
+                  >
+                    {name} {label}
+                    <input
+                      type="range"
+                      className="mc-range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={value}
+                      disabled={!dims}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        applyAdjustment({
+                          ...adjustment,
+                          [name]: name === 'hue' ? raw : raw / 100,
+                        });
+                      }}
+                    />
+                  </label>
+                ))}
+
+              <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                <MCButton
+                  small
+                  onClick={commitAdjustment}
+                  disabled={isNeutral(adjustment)}
+                  title="Keep this colour change and start a fresh one from here"
+                >
+                  apply
+                </MCButton>
+                <MCButton
+                  small
+                  variant="danger"
+                  onClick={resetAdjustment}
+                  disabled={isNeutral(adjustment)}
+                  title="Put the original colours back"
+                >
+                  reset
+                </MCButton>
+              </div>
+              <div
+                className="t-gray"
+                style={{ fontSize: 16, marginTop: 6, lineHeight: 'var(--lh-body)' }}
+              >
+                {selection ? 'changes the selected area only' : 'changes the whole texture'}
               </div>
             </div>
 
@@ -681,23 +1321,43 @@ export function TextureEditor({ slotKey, onClose }: { slotKey: string; onClose: 
                 width={dims.width * zoom}
                 height={dims.height * zoom}
                 className="editor-canvas"
-                style={{ cursor: tool === 'eyedropper' ? 'crosshair' : 'cell' }}
+                style={{
+                  cursor: tool === 'select' || tool === 'wand' || tool === 'eyedropper'
+                    ? 'crosshair'
+                    : 'cell',
+                }}
                 onPointerDown={(e) => {
                   paintingRef.current = true;
                   lastPixelRef.current = '';
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  applyAt(e.clientX, e.clientY, true);
+                  if (tool === 'select') beginSelect(e.clientX, e.clientY);
+                  else if (tool === 'wand') wandAt(e.clientX, e.clientY);
+                  else applyAt(e.clientX, e.clientY, true);
                 }}
                 onPointerMove={(e) => {
+                  if (tool === 'wand') return;
+                  if (tool === 'select') {
+                    if (paintingRef.current) {
+                      dragSelect(e.clientX, e.clientY);
+                    } else {
+                      // The cursor is the only hint that an edge can be grabbed.
+                      const target = hitAt(e.clientX, e.clientY);
+                      e.currentTarget.style.cursor =
+                        (target && CURSOR_FOR[target]) ?? 'crosshair';
+                    }
+                    return;
+                  }
                   if (paintingRef.current) applyAt(e.clientX, e.clientY, false);
                 }}
                 onPointerUp={(e) => {
                   paintingRef.current = false;
+                  gestureRef.current = null;
                   e.currentTarget.releasePointerCapture(e.pointerId);
                   setStrokeTick((t) => t + 1);
                 }}
                 onPointerCancel={() => {
                   paintingRef.current = false;
+                  gestureRef.current = null;
                   setStrokeTick((t) => t + 1);
                 }}
               />
