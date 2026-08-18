@@ -70,6 +70,10 @@ function CandidateChip({
 }) {
   const isImage = slot.key.startsWith('texture:');
   const url = useTexture(isImage ? candidate.packId : null, candidate.primaryPath);
+  // A pack covering several game versions ships this asset more than once. Only
+  // the spelling its own version reads is used, so name the others rather than
+  // let a file the pack clearly contains look like it was ignored for no reason.
+  const alternates = candidate.alternates ?? [];
 
   return (
     <button
@@ -90,7 +94,7 @@ function CandidateChip({
             ? '0 0 0 2px var(--mc-green)'
             : 'none',
       }}
-      title={`${pack.name}\n${candidate.primaryPath}\n${candidate.width ?? '?'}×${candidate.height ?? '?'} · ${candidate.size} B${index <= 9 ? `\n\nPress ${index} to pick this` : ''}${isPicked ? '\n\nPicked' : isWinner ? '\n\nWinning by priority' : ''}`}
+      title={`${pack.name}\n${candidate.primaryPath}\n${candidate.width ?? '?'}×${candidate.height ?? '?'} · ${candidate.size} B${alternates.length > 0 ? `\n\nAlso in this pack under another version's name:\n${alternates.map((a) => a.path).join('\n')}` : ''}${index <= 9 ? `\n\nPress ${index} to pick this` : ''}${isPicked ? '\n\nPicked' : isWinner ? '\n\nWinning by priority' : ''}`}
     >
       {index <= 9 && (
         <span

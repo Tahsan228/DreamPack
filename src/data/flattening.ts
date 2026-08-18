@@ -1,9 +1,15 @@
 /**
  * The 1.13 "Flattening" rename table.
  *
- * Pre-1.13 packs name textures descriptively (`sword_diamond`, `wool_colored_red`);
- * 1.13+ packs use registry names (`diamond_sword`, `red_wool`). To let a 1.8.9 pack
+ * Pre-1.13 packs name textures descriptively (`wool_colored_red`, `apple_golden`);
+ * 1.13+ packs use registry names (`red_wool`, `golden_apple`). To let a 1.8.9 pack
  * and a 1.20 pack compete for the same slot, both sides normalise to the modern name.
+ *
+ * Every entry here is a rename that really happened. An invented one is worse than
+ * a missing one: a missing entry leaves a texture under its own name, which is
+ * always right for a same-era export, while an invented entry renames a texture on
+ * the way out to something the game does not read, and it vanishes from the pack.
+ * The tool entries were exactly that mistake - see the note on TOOL_MATERIALS.
  *
  * Coverage is complete for items and thorough for the blocks bedwars packs actually
  * touch. Anything absent falls through unchanged and gets flagged `unmapped` in the
@@ -57,7 +63,11 @@ const DOOR_WOODS: Array<[legacy: string, modern: string]> = [
   ['dark_oak', 'dark_oak'],
 ];
 
-/** Tool materials. `wood` -> `wooden`, `gold` -> `golden`. */
+/**
+ * Tool materials. Only the words changed in 1.13: `wood` -> `wooden`,
+ * `gold` -> `golden`. The order never did — 1.8.9 already spells these
+ * `diamond_sword.png`, not `sword_diamond.png`.
+ */
 const TOOL_MATERIALS: Array<[legacy: string, modern: string]> = [
   ['wood', 'wooden'],
   ['stone', 'stone'],
@@ -81,10 +91,19 @@ const ARMOR_PIECES = ['helmet', 'chestplate', 'leggings', 'boots'];
 function buildItemMap(): Record<string, string> {
   const m: Record<string, string> = {};
 
-  // Tools: 1.8 `sword_diamond` -> 1.13 `diamond_sword`
+  /*
+   * Tools: 1.8 `wood_sword` -> 1.13 `wooden_sword`.
+   *
+   * Only the material word moves. Four real 1.8.9 packs (Divine, VENOM, Whut,
+   * Smoke) all ship `textures/items/diamond_sword.png`, `stone_axe.png`,
+   * `gold_pickaxe.png` and so on, and not one of them contains a single
+   * `sword_diamond.png`-style file. Listing a rename for stone, iron and diamond
+   * renamed those textures on the way out to names the game never reads, so they
+   * silently vanished from the exported pack.
+   */
   for (const tool of TOOLS) {
     for (const [lm, mm] of TOOL_MATERIALS) {
-      m[`${tool}_${lm}`] = `${mm}_${tool}`;
+      if (lm !== mm) m[`${lm}_${tool}`] = `${mm}_${tool}`;
     }
   }
 

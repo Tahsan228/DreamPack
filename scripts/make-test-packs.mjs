@@ -142,11 +142,11 @@ function buildPack({ name, palette, description }) {
   const t = (path, w, h, pixel) => [path, new Uint8Array(encodePng(w, h, pixel))];
 
   const files = Object.fromEntries([
-    t('assets/minecraft/textures/items/sword_diamond.png', 16, 16, sprite(SWORD, palette.tool)),
-    t('assets/minecraft/textures/items/sword_iron.png', 16, 16, sprite(SWORD, palette.metal)),
-    t('assets/minecraft/textures/items/sword_gold.png', 16, 16, sprite(SWORD, palette.gold)),
-    t('assets/minecraft/textures/items/pickaxe_diamond.png', 16, 16, sprite(PICK, palette.tool)),
-    t('assets/minecraft/textures/items/pickaxe_iron.png', 16, 16, sprite(PICK, palette.metal)),
+    t('assets/minecraft/textures/items/diamond_sword.png', 16, 16, sprite(SWORD, palette.tool)),
+    t('assets/minecraft/textures/items/iron_sword.png', 16, 16, sprite(SWORD, palette.metal)),
+    t('assets/minecraft/textures/items/gold_sword.png', 16, 16, sprite(SWORD, palette.gold)),
+    t('assets/minecraft/textures/items/diamond_pickaxe.png', 16, 16, sprite(PICK, palette.tool)),
+    t('assets/minecraft/textures/items/iron_pickaxe.png', 16, 16, sprite(PICK, palette.metal)),
     t('assets/minecraft/textures/items/apple_golden.png', 16, 16, sprite(APPLE, palette.gold)),
     t('assets/minecraft/textures/items/apple.png', 16, 16, sprite(APPLE, palette.accent)),
     t('assets/minecraft/textures/items/bread.png', 16, 16, sprite(BREAD, palette.bread)),

@@ -22,7 +22,7 @@ const sourcePack: ImportedPack = {
 };
 
 const sourceIndex = [
-  { path: 'assets/minecraft/textures/items/sword_diamond.png', size: 300, hash: 'original' },
+  { path: 'assets/minecraft/textures/items/diamond_sword.png', size: 300, hash: 'original' },
 ];
 
 /** Stands in for the PNG bytes the editor's canvas would produce. */
@@ -110,8 +110,8 @@ describe('saveEdit', () => {
 
     const mcmeta = new TextEncoder().encode('{"animation":{"frametime":2}}');
     const animatedIndex = [
-      { path: 'assets/minecraft/textures/items/sword_diamond.png', size: 300, hash: 'orig' },
-      { path: 'assets/minecraft/textures/items/sword_diamond.png.mcmeta', size: mcmeta.length, hash: 'meta' },
+      { path: 'assets/minecraft/textures/items/diamond_sword.png', size: 300, hash: 'orig' },
+      { path: 'assets/minecraft/textures/items/diamond_sword.png.mcmeta', size: mcmeta.length, hash: 'meta' },
     ];
 
     // The bytes have to be readable, since saveEdit copies them across.

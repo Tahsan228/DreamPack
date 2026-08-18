@@ -19,12 +19,12 @@ const pack = (id: string, importedAt: number): ImportedPack => ({
 });
 
 const fileFor = (id: string) => ({
-  path: `assets/minecraft/textures/items/sword_diamond.png`,
+  path: `assets/minecraft/textures/items/diamond_sword.png`,
   bytes: new Uint8Array([1, 2, 3, id.charCodeAt(0)]),
 });
 
 const indexFor = () => [
-  { path: 'assets/minecraft/textures/items/sword_diamond.png', size: 4, hash: 'h' },
+  { path: 'assets/minecraft/textures/items/diamond_sword.png', size: 4, hash: 'h' },
 ];
 
 describe('reconcile', () => {

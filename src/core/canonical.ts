@@ -1,4 +1,4 @@
-import type { Category, CanonicalResult, Era } from './types';
+import type { Category, CanonicalResult } from './types';
 import type { VersionSpec } from './versions';
 import {
   BLOCK_ALIASES,
@@ -81,41 +81,46 @@ export function humanize(name: string): string {
 /**
  * Fold a texture basename to its modern registry name.
  *
+ * The pre-Flattening spelling is folded whatever era the pack was detected as.
+ * Era is a guess from the majority of a pack's paths, and packs that cover
+ * several game versions ship both spellings side by side — so letting era decide
+ * whether to fold meant one pack's `wool_colored_white.png` became a slot of its
+ * own, which then exported over the top of the real white wool.
+ *
  * `unmapped` marks names with no cross-era counterpart at all. Those still merge
  * fine between packs of the same era — they just cannot be renamed if the export
  * target sits on the other side of the Flattening, so the UI flags them.
  */
 function mapName(
   name: string,
-  era: Era,
   forward: Readonly<Record<string, string>>,
   aliases: Readonly<Record<string, string>>,
   reverse: Readonly<Record<string, string>>,
 ): { name: string; unmapped: boolean } {
   if (name.includes('/')) return { name, unmapped: false };
 
-  if (era === 'legacy') {
-    const modern = forward[name] ?? aliases[name];
-    if (modern) return { name: modern, unmapped: false };
-    // Already-modern spellings (diamond_helmet, obsidian) are correct as-is.
-    return { name, unmapped: !(name in reverse) };
-  }
+  const modern = forward[name] ?? aliases[name];
+  if (modern) return { name: modern, unmapped: false };
 
-  return { name, unmapped: !(name in reverse) && !(name in forward) };
+  // Already-modern spellings (diamond_helmet, obsidian) are correct as-is.
+  return { name, unmapped: !(name in reverse) };
 }
 
-const mapItemName = (name: string, era: Era) =>
-  mapName(name, era, ITEM_LEGACY_TO_MODERN, ITEM_ALIASES, ITEM_MODERN_TO_LEGACY);
+const mapItemName = (name: string) =>
+  mapName(name, ITEM_LEGACY_TO_MODERN, ITEM_ALIASES, ITEM_MODERN_TO_LEGACY);
 
-const mapBlockName = (name: string, era: Era) =>
-  mapName(name, era, BLOCK_LEGACY_TO_MODERN, BLOCK_ALIASES, BLOCK_MODERN_TO_LEGACY);
+const mapBlockName = (name: string) =>
+  mapName(name, BLOCK_LEGACY_TO_MODERN, BLOCK_ALIASES, BLOCK_MODERN_TO_LEGACY);
 
 /**
  * Turn a pack-relative file path into a version-independent slot identity.
  * Returns null for files that are not pickable assets (pack.mcmeta, companions,
  * directory entries, unknown junk).
+ *
+ * The result depends on the path alone. Which era a pack was detected as must
+ * never change what an asset *is*, only how it is spelled on the way out.
  */
-export function canonicalize(path: string, era: Era): CanonicalResult | null {
+export function canonicalize(path: string): CanonicalResult | null {
   const clean = path.replace(/\\/g, '/').replace(/^\.?\//, '');
   if (clean.endsWith('/')) return null;
   if (clean === 'pack.mcmeta' || clean === 'pack.png') return null;
@@ -175,11 +180,11 @@ export function canonicalize(path: string, era: Era): CanonicalResult | null {
     const tail = slash === -1 ? sub : sub.slice(slash + 1);
 
     if (dir === 'items' || dir === 'item') {
-      const { name, unmapped } = mapItemName(tail, era);
+      const { name, unmapped } = mapItemName(tail);
       return { key: `texture:${ns}item/${name}`, category: 'Items', displayName: humanize(name), unmapped };
     }
     if (dir === 'blocks' || dir === 'block') {
-      const { name, unmapped } = mapBlockName(tail, era);
+      const { name, unmapped } = mapBlockName(tail);
       return { key: `texture:${ns}block/${name}`, category: 'Blocks', displayName: humanize(name), unmapped };
     }
 

@@ -33,7 +33,7 @@ function legacyPackZip(tint: number, wrapper = ''): Uint8Array {
   return zipSync({
     [`${wrapper}pack.mcmeta`]: mcmeta(1, '§aTest §fPack'),
     [`${wrapper}pack.png`]: fakePng(64, 64, tint),
-    [`${wrapper}assets/minecraft/textures/items/sword_diamond.png`]: fakePng(16, 16, tint),
+    [`${wrapper}assets/minecraft/textures/items/diamond_sword.png`]: fakePng(16, 16, tint),
     [`${wrapper}assets/minecraft/textures/items/apple_golden.png`]: fakePng(16, 16, tint),
     [`${wrapper}assets/minecraft/textures/blocks/wool_colored_red.png`]: fakePng(16, 16, tint),
     [`${wrapper}assets/minecraft/textures/blocks/water_still.png`]: fakePng(16, 512, tint),
@@ -83,7 +83,7 @@ describe('pack reading', () => {
   it('strips a wrapper folder so paths come out pack-relative', () => {
     const pack = readZip(legacyPackZip(1, 'MyCoolPack/'));
     expect(pack.index.map((f) => f.path)).toContain(
-      'assets/minecraft/textures/items/sword_diamond.png',
+      'assets/minecraft/textures/items/diamond_sword.png',
     );
     expect(pack.meta.packFormat).toBe(1);
   });
@@ -155,7 +155,7 @@ describe('two packs through the full pipeline', () => {
     }
 
     // The pick wins; everything else follows the priority order.
-    expect(out.get('assets/minecraft/textures/items/sword_diamond.png')).toBe('b');
+    expect(out.get('assets/minecraft/textures/items/diamond_sword.png')).toBe('b');
     expect(out.get('assets/minecraft/textures/items/apple_golden.png')).toBe('a');
     expect(out.get('assets/minecraft/textures/blocks/wool_colored_red.png')).toBe('a');
     expect(out.get('assets/minecraft/textures/gui/icons.png')).toBe('a');
