@@ -307,7 +307,7 @@ await page.waitForTimeout(600);
   const { unzipSync } = await import('fflate');
   const { readFileSync } = await import('node:fs');
   const zip = unzipSync(readFileSync('.shots/exported-resized.zip'));
-  const name = Object.keys(zip).find((e) => e.endsWith('sword_diamond.png'));
+  const name = Object.keys(zip).find((e) => e.endsWith('diamond_sword.png'));
   if (!name) {
     fail.push('resized sword missing from the export');
   } else {

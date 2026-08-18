@@ -1,5 +1,6 @@
-import type { AssetSlot, Candidate, Era } from './types';
-import { canonicalize, companionTarget } from './canonical';
+import type { AssetSlot, CanonicalResult, Candidate, Era } from './types';
+import { canonicalize, companionTarget, denormalize } from './canonical';
+import { getVersion, type VersionSpec } from './versions';
 
 export interface IndexedFile {
   path: string;
@@ -16,12 +17,40 @@ export interface IndexablePack {
   files: IndexedFile[];
 }
 
+/** The version whose spelling a pack of each era uses natively. */
+const ERA_VERSION = {
+  legacy: getVersion('1.8.9'),
+  modern: getVersion('1.20.1'),
+} as const;
+
+/**
+ * Which of a pack's several copies of one asset is that pack's answer for the slot.
+ *
+ * A pack covering more than one game version ships the asset under both
+ * spellings — `textures/blocks/cobblestone_mossy.png` beside
+ * `textures/block/mossy_cobblestone.png`. The one the pack's own version reads
+ * is its real artwork; the other is there for players on the far side of the
+ * Flattening. Nothing else distinguishes them, so file order decides when
+ * neither matches.
+ */
+function choosePrimary(files: IndexedFile[], key: string, era: Era): IndexedFile {
+  if (files.length === 1) return files[0];
+  const native = denormalize(key, ERA_VERSION[era]);
+  return files.find((f) => f.path === native) ?? files[0];
+}
+
 /**
  * Fold every pack's file list into one union of slots.
  *
  * Two packs land on the same slot when their paths canonicalise to the same key,
  * which is what lets a 1.8.9 `apple_golden.png` and a 1.20 `golden_apple.png`
  * compete for a single pick.
+ *
+ * Each pack contributes at most one candidate per slot. A candidate is addressed
+ * by its pack everywhere downstream — picks, the candidate strip, export — so a
+ * pack appearing twice in one slot produced a chip that could not be picked, a
+ * preview that ignored the click, and a slot that "differed across packs"
+ * because a pack differed from itself.
  */
 export function buildSlotIndex(packs: IndexablePack[]): AssetSlot[] {
   const slots = new Map<string, AssetSlot>();
@@ -38,33 +67,50 @@ export function buildSlotIndex(packs: IndexablePack[]): AssetSlot[] {
       }
     }
 
+    // Group this pack's files by the slot they land on before making candidates,
+    // so the duplicates are visible at the point the choice has to be made.
+    const byKey = new Map<string, { canon: CanonicalResult; files: IndexedFile[] }>();
     for (const f of pack.files) {
-      const canon = canonicalize(f.path, pack.era);
+      const canon = canonicalize(f.path);
       if (!canon) continue;
+      const group = byKey.get(canon.key);
+      if (group) group.files.push(f);
+      else byKey.set(canon.key, { canon, files: [f] });
+    }
 
-      let slot = slots.get(canon.key);
+    for (const [key, { canon, files }] of byKey) {
+      let slot = slots.get(key);
       if (!slot) {
         slot = {
-          key: canon.key,
+          key,
           category: canon.category,
           displayName: canon.displayName,
           unmapped: canon.unmapped,
           candidates: [],
         };
-        slots.set(canon.key, slot);
+        slots.set(key, slot);
       } else if (canon.unmapped) {
         slot.unmapped = true;
       }
 
+      const primary = choosePrimary(files, key, pack.era);
       const candidate: Candidate = {
         packId: pack.id,
-        primaryPath: f.path,
-        companions: companionsByTarget.get(f.path) ?? [],
-        size: f.size,
-        hash: f.hash,
+        primaryPath: primary.path,
+        companions: companionsByTarget.get(primary.path) ?? [],
+        size: primary.size,
+        hash: primary.hash,
       };
-      if (f.width !== undefined) candidate.width = f.width;
-      if (f.height !== undefined) candidate.height = f.height;
+      if (primary.width !== undefined) candidate.width = primary.width;
+      if (primary.height !== undefined) candidate.height = primary.height;
+
+      const rest = files.filter((f) => f !== primary);
+      if (rest.length > 0) {
+        candidate.alternates = rest.map((f) => ({
+          path: f.path,
+          companions: companionsByTarget.get(f.path) ?? [],
+        }));
+      }
 
       slot.candidates.push(candidate);
     }
@@ -131,6 +177,52 @@ export function differsAcrossPacks(slot: AssetSlot): boolean {
   if (slot.candidates.length < 2) return false;
   const first = slot.candidates[0].hash;
   return slot.candidates.some((c) => c.hash !== first);
+}
+
+/** Two slots whose names spell out to one file on the target version. */
+export interface PathConflict {
+  outPath: string;
+  /** The slot the filename belongs to there. */
+  kept: string;
+  dropped: string;
+}
+
+/**
+ * Give every slot the file it will be written to, and settle the cases where two
+ * of them want the same one.
+ *
+ * A name with no mapping of its own can land on the filename another asset's
+ * mapped spelling writes to - `stone_slab_side` beside `smooth_stone_slab_side`
+ * on a 1.8.9 export. Left alone, whichever was written last won, which put a
+ * texture on the wrong block with nothing said about it. The file goes to the
+ * asset whose name it actually is on that version, and the other is reported.
+ */
+export function planExportPaths(
+  keys: Iterable<string>,
+  version: VersionSpec,
+): { plan: Map<string, string>; conflicts: PathConflict[] } {
+  const holder = new Map<string, string>();
+  const conflicts: PathConflict[] = [];
+
+  for (const key of keys) {
+    const outPath = denormalize(key, version);
+    if (!outPath) continue;
+
+    const held = holder.get(outPath);
+    if (held === undefined) {
+      holder.set(outPath, key);
+      continue;
+    }
+
+    const owner = canonicalize(outPath)?.key;
+    const kept = owner === key ? key : held;
+    holder.set(outPath, kept);
+    conflicts.push({ outPath, kept, dropped: kept === key ? held : key });
+  }
+
+  const plan = new Map<string, string>();
+  for (const [outPath, key] of holder) plan.set(key, outPath);
+  return { plan, conflicts };
 }
 
 /** Final key -> winning candidate map used by the exporter. */

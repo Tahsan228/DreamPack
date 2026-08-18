@@ -21,7 +21,7 @@ const pack = (id: string, name: string): ImportedPack => ({
   color: '#55FF55',
 });
 
-const files = ['sword_diamond', 'apple_golden'].map((name) => ({
+const files = ['diamond_sword', 'apple_golden'].map((name) => ({
   path: `assets/minecraft/textures/items/${name}.png`,
   size: 300,
   hash: `${name}-hash`,

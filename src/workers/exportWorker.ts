@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 import { zip, type AsyncZipOptions } from 'fflate';
-import { denormalize, parseKey } from '../core/canonical';
+import { parseKey } from '../core/canonical';
 import { citReferences } from '../core/citParse';
 import { mergeSoundsJson, type SoundsJson } from '../core/soundsMerge';
-import { buildSlotIndex, resolveAll, type IndexablePack } from '../core/resolve';
+import { buildSlotIndex, planExportPaths, resolveAll, type IndexablePack } from '../core/resolve';
 import { getVersion } from '../core/versions';
 import { getFileBytes, getFileIndex } from '../db/idb';
 import type { Era } from '../core/types';
@@ -63,6 +63,16 @@ async function handleExport(req: ExportRequest): Promise<void> {
   const total = resolved.size || 1;
   let done = 0;
   const availableSounds = new Set<string>();
+  const nameOf = (key: string) => slotByKey.get(key)?.displayName ?? key;
+
+  // Settle which slot gets which file before writing any of them, so a texture
+  // cannot land on another block by being written second.
+  const { plan, conflicts } = planExportPaths(resolved.keys(), version);
+  for (const c of conflicts) {
+    warnings.push(
+      `${nameOf(c.dropped)} and ${nameOf(c.kept)} both export to ${c.outPath.split('/').pop()} - kept ${nameOf(c.kept)}`,
+    );
+  }
 
   for (const [key, candidate] of resolved) {
     done++;
@@ -70,7 +80,7 @@ async function handleExport(req: ExportRequest): Promise<void> {
       post({ type: 'progress', phase: 'Building pack', ratio: 0.15 + 0.6 * (done / total) });
     }
 
-    const outPath = denormalize(key, version);
+    const outPath = plan.get(key);
     if (!outPath) continue;
 
     const bytes = await getFileBytes(candidate.packId, candidate.primaryPath);

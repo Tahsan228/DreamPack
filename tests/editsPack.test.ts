@@ -24,7 +24,7 @@ describe('edits pack storage paths', () => {
     for (const key of keys) {
       const path = editStoragePath(key);
       expect(path, key).not.toBeNull();
-      expect(canonicalize(path!, 'modern')?.key, key).toBe(key);
+      expect(canonicalize(path!)?.key, key).toBe(key);
     }
   });
 
@@ -49,7 +49,7 @@ describe('an edit flowing through resolve and export', () => {
     {
       id: 'pack-a',
       era: 'legacy',
-      files: [{ path: 'assets/minecraft/textures/items/sword_diamond.png', size: 300, hash: 'h1' }],
+      files: [{ path: 'assets/minecraft/textures/items/diamond_sword.png', size: 300, hash: 'h1' }],
     },
     {
       id: EDITS_PACK_ID,
@@ -74,7 +74,7 @@ describe('an edit flowing through resolve and export', () => {
 
   it('exports a modern-stored edit under the 1.8.9 filename', () => {
     expect(denormalize(slots[0].key, getVersion('1.8.9')))
-      .toBe('assets/minecraft/textures/items/sword_diamond.png');
+      .toBe('assets/minecraft/textures/items/diamond_sword.png');
   });
 
   it('exports the same edit under the modern filename for a 1.20 target', () => {

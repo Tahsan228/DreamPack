@@ -30,8 +30,8 @@ const files = (names: string[]) =>
 // Pack A has both assets; pack B only the sword. Bulk actions have to cope with
 // that asymmetry, which is the whole point of the "where it has them" rule.
 const indexes = {
-  a: files(['sword_diamond', 'apple_golden']),
-  b: files(['sword_diamond']),
+  a: files(['diamond_sword', 'apple_golden']),
+  b: files(['diamond_sword']),
 };
 
 describe('pick history and bulk actions', () => {

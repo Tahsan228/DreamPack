@@ -71,6 +71,13 @@ export interface Candidate {
   height?: number;
   /** Hash of file bytes, used by the "only differing" filter. */
   hash: string;
+  /**
+   * Other copies of this asset in the same pack, under a different version's
+   * spelling. Packs that cover several game versions ship both; only one of them
+   * is this pack's answer for the slot, and the rest are recorded here so the
+   * duplicate is visible rather than silently dropped.
+   */
+  alternates?: Array<{ path: string; companions: string[] }>;
 }
 
 /** A version-independent thing you can pick a source for. */
